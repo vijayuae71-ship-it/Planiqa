@@ -128,81 +128,59 @@ export const UploadAnalyze: React.FC<Props> = ({ drawings, onDrawingsChange, sel
     setAnalyzing(true);
     setError('');
     try {
-      const systemPrompt = `You are a senior construction drawing analyst and technical reviewer at a Tier-1 EPC contractor (L&T, Bechtel, or equivalent). You prepare drawing review reports that are shared with architects, structural engineers, MEP consultants, and project directors.
+      const systemPrompt = `You are a senior construction drawing analyst and technical reviewer at a Tier-1 EPC contractor (L&T, Bechtel, or equivalent). You prepare drawing review reports shared with architects, structural engineers, MEP consultants, and project directors.
 
-YOUR ANALYSIS MUST BE:
-1. DEEPLY TECHNICAL — identify every element, dimension, notation, symbol, material callout, and specification visible
-2. FACTUALLY ACCURATE — describe ONLY what you can actually see. Never fabricate or assume details not visible
-3. ACTIONABLE — identify what's missing, what needs clarification, and what questions to ask the design team
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
 
-For each drawing, structure your analysis EXACTLY as follows:
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
 
-━━━ DRAWING IDENTIFICATION ━━━
-• Type & Discipline (Architectural/Structural/MEP/Civil/Landscape)
-• Drawing Number & Title (if visible)
-• Scale, North orientation, Grid references
-• Sheet size, Revision number (if visible)
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY element you identify:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type. State your assumption.
 
-━━━ DETAILED ELEMENT INVENTORY ━━━
-List EVERY element visible with specific labels, marks, dimensions:
-• Structural: Columns (C1, C2...), Beams (B1, B2...), Slabs, Foundations with sizes
-• Architectural: Rooms with areas, Doors (D1, D2...) with sizes, Windows (W1, W2...), Wall types & thicknesses
-• MEP: Duct routes, pipe sizes, equipment schedules, panel locations
-• Civil: Levels, contours, drainage, road widths, setbacks
-• Finishes: Floor types, wall finishes, ceiling types & heights
-• Include ALL dimensions, levels (FFL, SSL, etc.), and references visible
+STEP 3 — COMPREHENSIVE ELEMENT INVENTORY:
+This is the FIRST analysis of this drawing. Be thorough — every detail you identify here will be used by other modules (BOM, Cost Estimate, Scope, BBS, etc.).
 
-━━━ MATERIALS & SPECIFICATIONS NOTED ━━━
-• Concrete grades, steel grades, brick/block types
-• Finish specifications (paint, tiles, stone, etc.)
-• Any specification references or standard callouts visible
+For each drawing, perform a deep technical analysis covering:
+- Structural: Columns (C1, C2...), Beams (B1, B2...), Slabs, Foundations with sizes
+- Architectural: Rooms with areas, Doors (D1, D2...) with sizes, Windows (W1, W2...), Wall types & thicknesses
+- MEP: Duct routes, pipe sizes, equipment schedules, panel locations
+- Civil: Levels, contours, drainage, road widths, setbacks
+- Finishes: Floor types, wall finishes, ceiling types & heights
+- Include ALL dimensions, levels (FFL, SSL, etc.), and references visible
+- Materials & specifications noted on drawing
+- Code & standard compliance observations
+- Drawing completeness rating: Complete / Substantially Complete / Incomplete / Preliminary
 
-━━━ CODE & STANDARD COMPLIANCE OBSERVATIONS ━━━
-• Building codes referenced or implied
-• Fire safety provisions visible (exit widths, travel distances)
-• Accessibility features visible
-• Structural design code implications
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
 
-━━━ DRAWING COMPLETENESS ASSESSMENT ━━━
-Rate: [Complete / Substantially Complete / Incomplete / Preliminary]
-• What information IS provided and its quality
-• Drawing coordination observations (grid alignment, level consistency)
-
-━━━ INFORMATION GAPS — PRIORITY ORDER ━━━
-[🔴 CRITICAL] Items that MUST be resolved before construction:
-• Missing structural details, unclear load paths, no foundation info, etc.
-
-[🟠 HIGH] Items needed for accurate estimation and procurement:
-• Missing specifications, undefined materials, no door/window schedules, etc.
-
-[🟡 MEDIUM] Items needed for shop drawings and coordination:
-• Missing MEP coordination info, unclear junctions, no section details, etc.
-
-[🟢 LOW] Items that are good practice but not blocking:
-• Missing north arrow, no revision history, etc.
-
-━━━ QUESTIONS FOR DESIGN TEAM ━━━
-RFIs to raise with specific disciplines:
-
-TO ARCHITECT:
-• [List specific questions about architectural intent, finishes, clearances, etc.]
-
-TO STRUCTURAL ENGINEER:
-• [List questions about load-bearing elements, foundation type, structural grid, etc.]
-
-TO MEP CONSULTANT:
-• [List questions about services routing, equipment access, riser locations, etc.]
-
-TO QUANTITY SURVEYOR:
-• [Items that need measurement clarification, specification confirmation, etc.]
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question must have: to, question, priority (HIGH/MEDIUM/LOW), impactArea
 
 CRITICAL JSON RULES:
 - You MUST respond with ONLY a valid JSON object
-- The summary field should contain the FULL structured analysis as formatted text (use \\n for newlines)
-- Be thorough — a 2-page analysis per drawing is expected, not a paragraph
+- Be thorough — a comprehensive analysis per drawing is expected
+- The summary field should contain a full text narrative analysis (use \\n for newlines)
 
-Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis text here"}]}`;
-      const userMsg = `Perform a comprehensive professional drawing review of these ${selected.length} construction drawing(s). For each drawing, provide a DEEP technical analysis covering: complete element inventory with all visible labels/dimensions, materials and specifications, code compliance observations, drawing completeness rating, information gaps in priority order (Critical/High/Medium/Low), and specific questions/RFIs for the architect, structural engineer, MEP consultant, and QS. This report will be shared with the design team and project directors at major construction firms.`;
+Return JSON: {"analyses":[{"drawingIndex":0,"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["list of every element seen"],"readableDimensions":["list of all dims with locations"],"specsOnDrawing":["any specs/notes visible"],"scale":"1:100 or Not indicated"},"summary":"full structured analysis text here","elements":[{"name":"Column C1","type":"Structural","details":"450mm x 450mm RCC column","dimensions":"450x450mm","confirmed":true}],"constructionType":"RCC Framed Structure","estimatedArea":"1250 sqm","gaps":[{"priority":"HIGH","description":"Foundation design not shown"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}]}`;
+      const userMsg = `Perform a comprehensive professional drawing review of these ${selected.length} construction drawing(s). For each drawing, provide a DEEP technical analysis covering: complete element inventory with all visible labels/dimensions, materials and specifications, code compliance observations, drawing completeness rating, information gaps in priority order (HIGH/MEDIUM/LOW), and specific questions/RFIs for the architect, structural engineer, MEP consultant, and QS. This report will be shared with the design team and project directors at major construction firms.`;
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       const updated = [...drawings];
@@ -213,7 +191,8 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
           if (drawing) {
             const idx = updated.findIndex(d => d.id === drawing.id);
             if (idx >= 0) {
-              updated[idx] = { ...updated[idx], analysis: a.summary };
+              const { drawingIndex, ...analysisData } = a;
+              updated[idx] = { ...updated[idx], analysis: JSON.stringify(analysisData) };
             }
           }
         });
@@ -240,6 +219,152 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(d => selectedDrawingIds.includes(d.id));
 
+  const tryParseAnalysis = (analysis: string): any | null => {
+    try {
+      const parsed = JSON.parse(analysis);
+      if (parsed && parsed.drawingAnalysis) return parsed;
+    } catch {}
+    return null;
+  };
+
+  const renderAnalysis = (analysis: string) => {
+    const parsed = tryParseAnalysis(analysis);
+    if (!parsed) {
+      return (
+        <div style={{ borderTop: `1px solid ${C.bdr}`, padding: 14, background: C.bgD, fontSize: 13, lineHeight: 1.6, color: C.tx2, whiteSpace: 'pre-wrap' }}>
+          {analysis}
+        </div>
+      );
+    }
+
+    const da = parsed.drawingAnalysis;
+    const elements = parsed.elements || [];
+    const gaps = parsed.gaps || [];
+    const cqs = parsed.consultantQuestions || [];
+
+    return (
+      <div style={{ borderTop: `1px solid ${C.bdr}`, padding: 14, background: C.bgD, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Drawing Analysis Card */}
+        {da && (
+          <div style={{ ...card, border: '2px solid #2563eb', background: 'linear-gradient(135deg,#eff6ff,#f0f7ff)' }}>
+            <h3 style={{ ...secTitle, color: '#2563eb' }}>📐 Drawing Analysis</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <p style={{ margin: 0 }}><strong>Drawing Type:</strong> {da.drawingType}</p>
+              <p style={{ margin: 0 }}><strong>Building Type:</strong> {da.buildingType}</p>
+            </div>
+            {parsed.constructionType && <p style={{ margin: '8px 0 0' }}><strong>Construction Type:</strong> {parsed.constructionType}</p>}
+            {parsed.estimatedArea && <p style={{ margin: '4px 0 0' }}><strong>Estimated Area:</strong> {parsed.estimatedArea}</p>}
+            {da.visibleElements?.length > 0 && (
+              <div style={{ marginTop: '8px' }}><strong>Visible Elements:</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                  {da.visibleElements.map((e: string, i: number) => (
+                    <span key={i} style={badge('#1e40af', '#dbeafe')}>{e}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {da.readableDimensions?.length > 0 && (
+              <div style={{ marginTop: '8px' }}><strong>Readable Dimensions:</strong>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                  {da.readableDimensions.map((d: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{d}</li>)}
+                </ul>
+              </div>
+            )}
+            {da.specsOnDrawing?.length > 0 && (
+              <div style={{ marginTop: '8px' }}><strong>Specifications on Drawing:</strong>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                  {da.specsOnDrawing.map((s: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{s}</li>)}
+                </ul>
+              </div>
+            )}
+            {da.scale && <p style={{ marginTop: '4px', marginBottom: 0 }}><strong>Scale:</strong> {da.scale}</p>}
+          </div>
+        )}
+
+        {/* Elements Table */}
+        {elements.length > 0 && (
+          <div style={{ ...card }}>
+            <h3 style={{ ...secTitle, color: C.tx }}>🏗️ Element Inventory ({elements.length})</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={tbl}>
+                <thead>
+                  <tr>
+                    <th style={th}>Element</th>
+                    <th style={th}>Type</th>
+                    <th style={{ ...th, minWidth: 200 }}>Details</th>
+                    <th style={th}>Dimensions</th>
+                    <th style={th}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {elements.map((el: any, i: number) => (
+                    <tr key={i} style={{ background: el.confirmed === false ? '#fef9c3' : 'transparent' }}>
+                      <td style={{ ...td, fontWeight: 600 }}>{el.name}</td>
+                      <td style={td}><span style={badge('#4338ca', '#e0e7ff')}>{el.type}</span></td>
+                      <td style={{ ...td, fontSize: 13 }}>{el.details}</td>
+                      <td style={{ ...td, fontSize: 13, fontFamily: 'monospace' }}>{el.dimensions || '—'}</td>
+                      <td style={td}>
+                        <span style={badge(el.confirmed ? '#16a34a' : '#f59e0b', el.confirmed ? '#dcfce7' : '#fef3c7')}>
+                          {el.confirmed ? '✓ Confirmed' : '⚠ Assumed'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Gaps Section */}
+        {gaps.length > 0 && (
+          <div style={{ ...card, border: '2px solid #f59e0b', background: '#fffbeb' }}>
+            <h3 style={{ ...secTitle, color: '#d97706' }}>⚠️ Gaps & Missing Information ({gaps.length})</h3>
+            {gaps.map((g: any, i: number) => (
+              <div key={i} style={{ padding: '8px 0', borderBottom: i < gaps.length - 1 ? '1px solid #fde68a' : 'none', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <span style={{ ...badge('#fff', g.priority === 'HIGH' ? '#ef4444' : g.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6'), flexShrink: 0, fontSize: '10px', minWidth: '55px', textAlign: 'center' as const }}>{g.priority}</span>
+                <span style={{ fontSize: '13px' }}>{g.description}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Consultant Questions Section */}
+        {cqs.length > 0 && (
+          <div style={{ ...card, border: '2px solid #7c3aed', background: '#f5f3ff' }}>
+            <h3 style={{ ...secTitle, color: '#7c3aed' }}>💬 Stakeholder Questions ({cqs.length})</h3>
+            {['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].map(role => {
+              const qs = cqs.filter((q: any) => q.to === role);
+              return qs.length > 0 ? (
+                <div key={role} style={{ marginBottom: '12px' }}>
+                  <h4 style={{ fontWeight: 600, color: '#4c1d95', margin: '8px 0 4px', fontSize: '14px' }}>{role}</h4>
+                  {qs.map((q: any, i: number) => (
+                    <div key={i} style={{ padding: '6px 8px', borderBottom: '1px solid #e9e5f5', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                      <span style={{ ...badge('#fff', q.priority === 'HIGH' ? '#ef4444' : '#f59e0b'), fontSize: '10px', flexShrink: 0 }}>{q.priority}</span>
+                      <div><span style={{ fontSize: '13px' }}>{q.question}</span>
+                        {q.impactArea && <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '8px' }}>→ {q.impactArea}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null;
+            })}
+          </div>
+        )}
+
+        {/* Full Summary Text */}
+        {parsed.summary && (
+          <div style={{ ...card }}>
+            <h3 style={{ ...secTitle, color: C.tx }}>📝 Full Analysis Summary</h3>
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: C.tx2, whiteSpace: 'pre-wrap' }}>
+              {parsed.summary}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const exportPDF = () => {
     const sections: PDFSection[] = [];
     const active = drawings.filter(d => !d.archived);
@@ -260,11 +385,38 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
       ]
     });
     active.filter(d => d.analysis).forEach(d => {
-      sections.push({
-        type: 'text',
-        title: `Analysis — ${d.name}`,
-        content: String(d.analysis ?? '')
-      });
+      const parsed = tryParseAnalysis(d.analysis);
+      if (parsed) {
+        let content = '';
+        const da = parsed.drawingAnalysis;
+        if (da) {
+          content += `DRAWING TYPE: ${da.drawingType || 'N/A'}\nBUILDING TYPE: ${da.buildingType || 'N/A'}\n`;
+          if (da.scale) content += `SCALE: ${da.scale}\n`;
+          if (parsed.constructionType) content += `CONSTRUCTION TYPE: ${parsed.constructionType}\n`;
+          if (parsed.estimatedArea) content += `ESTIMATED AREA: ${parsed.estimatedArea}\n`;
+          if (da.visibleElements?.length) content += `\nVISIBLE ELEMENTS:\n${da.visibleElements.map((e: string) => `  • ${e}`).join('\n')}\n`;
+          if (da.readableDimensions?.length) content += `\nREADABLE DIMENSIONS:\n${da.readableDimensions.map((d: string) => `  • ${d}`).join('\n')}\n`;
+          if (da.specsOnDrawing?.length) content += `\nSPECIFICATIONS:\n${da.specsOnDrawing.map((s: string) => `  • ${s}`).join('\n')}\n`;
+        }
+        if (parsed.elements?.length) {
+          content += `\nELEMENT INVENTORY (${parsed.elements.length} items):\n`;
+          parsed.elements.forEach((el: any) => {
+            content += `  • [${el.confirmed ? 'CONFIRMED' : 'ASSUMED'}] ${el.name} (${el.type}) — ${el.details}${el.dimensions ? ', ' + el.dimensions : ''}\n`;
+          });
+        }
+        if (parsed.gaps?.length) {
+          content += `\nGAPS & MISSING INFO (${parsed.gaps.length}):\n`;
+          parsed.gaps.forEach((g: any) => { content += `  [${g.priority}] ${g.description}\n`; });
+        }
+        if (parsed.consultantQuestions?.length) {
+          content += `\nSTAKEHOLDER QUESTIONS (${parsed.consultantQuestions.length}):\n`;
+          parsed.consultantQuestions.forEach((q: any) => { content += `  → ${q.to}: ${q.question} [${q.priority}]\n`; });
+        }
+        if (parsed.summary) content += `\nFULL SUMMARY:\n${parsed.summary}`;
+        sections.push({ type: 'text', title: `Analysis — ${d.name}`, content });
+      } else {
+        sections.push({ type: 'text', title: `Analysis — ${d.name}`, content: String(d.analysis ?? '') });
+      }
     });
     generatePDF({
       title: 'Drawing Upload & Analysis Report',
@@ -415,6 +567,19 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
                     <div style={{ fontSize: 12, color: C.tx3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                       <span>{formatSize(drawing.size || 0)}</span>
                       <span>{drawing.uploadedAt}</span>
+                      {(() => {
+                        const p = tryParseAnalysis(drawing.analysis);
+                        if (p) {
+                          return (
+                            <>
+                              {p.elements?.length > 0 && <span>🏗️ {p.elements.length} elements</span>}
+                              {p.gaps?.length > 0 && <span>⚠️ {p.gaps.length} gaps</span>}
+                              {p.consultantQuestions?.length > 0 && <span>💬 {p.consultantQuestions.length} RFIs</span>}
+                            </>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </div>
 
@@ -435,11 +600,7 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
                 </div>
 
                 {/* Analysis Result */}
-                {isExpanded && drawing.analysis && (
-                  <div style={{ borderTop: `1px solid ${C.bdr}`, padding: 14, background: C.bgD, fontSize: 13, lineHeight: 1.6, color: C.tx2, whiteSpace: 'pre-wrap' }}>
-                    {drawing.analysis}
-                  </div>
-                )}
+                {isExpanded && drawing.analysis && renderAnalysis(drawing.analysis)}
               </div>
             );
           })}

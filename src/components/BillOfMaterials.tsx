@@ -28,20 +28,34 @@ interface BOMItem {
   confirmed: boolean;
 }
 
+interface BOMData {
+  drawingAnalysis?: {
+    drawingType: string;
+    buildingType: string;
+    visibleElements: string[];
+    readableDimensions: string[];
+    specsOnDrawing: string[];
+    scale: string;
+  };
+  items: BOMItem[];
+  gaps?: { priority: string; description: string }[];
+  consultantQuestions?: { to: string; question: string; priority: string; impactArea: string }[];
+}
+
 const EXCHANGE_RATES: Record<string, number> = { USD: 1, AED: 3.67, INR: 83.5, SAR: 3.75, GBP: 0.79, EUR: 0.92, QAR: 3.64, OMR: 0.385 };
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', AED: 'د.إ', INR: '₹', SAR: 'ر.س', GBP: '£', EUR: '€', QAR: 'ر.ق', OMR: 'ر.ع' };
 
 export const BillOfMaterials: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKey, onStatusChange }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [data, setData] = useState<BOMItem[]>([]);
+  const [data, setData] = useState<BOMData | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [tradeFilter, setTradeFilter] = useState('all');
   const [currency, setCurrency] = useState('USD');
 
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;
-  const conv = (val: number) => val * rate;
+  const conv = (val: number) => val / (EXCHANGE_RATES['INR'] || 83.5) * (EXCHANGE_RATES[currency] || 1);
   const fmtC = (val: number) => `${sym} ${fmt(conv(val))}`;
 
   const generate = async () => {
@@ -53,6 +67,25 @@ export const BillOfMaterials: React.FC<Props> = ({ drawings, selectedDrawingIds,
       const rateTable = getCPWDRateReference('INR');
       const meRates = getMiddleEastRates();
       const systemPrompt = `You are a senior quantity surveyor (RICS/AACE certified, 20+ years experience) preparing Bills of Quantities/Materials for Tier-1 contractors (L&T, Sobha, Danube, Nagarjuna). Your BOQ/BOM output will be used for tendering, procurement, and cost control.
+
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type, but NOT explicitly shown. State your assumption: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — BILL OF MATERIALS DATA:
+Generate BOM data based on what is VISIBLE in the drawings. Extrapolate only where standard practice allows.
 
 ═══ MANDATORY RATE TABLE — YOU MUST USE THESE EXACT RATES ═══
 ${rateTable}
@@ -90,15 +123,30 @@ CRITICAL ACCURACY RULES:
 
 GENERATE 30-80+ LINE ITEMS. Each trade should have major material items with quantity breakdown, associated labor where applicable, testing/QC items per code.
 
-Return JSON array format:
-[{"trade":"Concrete Works","item":"PCC M15 Foundation","description":"Providing and laying PCC M15 (1:2:4) for foundation bed including levelling and curing","quantity":45.5,"unit":"m³","unitRate":5862,"total":266721,"rateSource":"CPWD DSR 2024 [DSR 4.2] — ₹5,862/m³","specification":"IS 456:2000, Min cement 270 kg/m³","measurementBasis":"IS 1200 Part 2. Foundation F1-F6: 6 nos × 2.0×2.0×0.15 = 3.6 m³, Strip footing: 45m × 0.6m × 0.15 = 4.05 m³","confirmed":true}]
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"What is the specified floor finish for the auditorium seating area? Drawing shows only outline without finish schedule.", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
+Return JSON object format:
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["walls","columns","beams"],"readableDimensions":["Overall: 45m × 30m"],"specsOnDrawing":["M25 concrete noted"],"scale":"1:100"},"items":[{"trade":"Concrete Works","item":"PCC M15 Foundation","description":"Providing and laying PCC M15 (1:2:4) for foundation bed including levelling and curing","quantity":45.5,"unit":"m³","unitRate":5862,"total":266721,"rateSource":"CPWD DSR 2024 [DSR 4.2] — ₹5,862/m³","specification":"IS 456:2000, Min cement 270 kg/m³","measurementBasis":"IS 1200 Part 2. Foundation F1-F6: 6 nos × 2.0×2.0×0.15 = 3.6 m³","confirmed":true}],"gaps":[{"priority":"HIGH","description":"Foundation design not shown — need structural engineer's foundation layout drawing"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}
 
 ALL rates MUST be in INR.`;
-      const userMsg = 'Generate a professional, contract-grade Bill of Quantities from these construction drawings. This BOQ will be reviewed by senior QS teams at major construction firms. CRITICAL: Use ONLY the EXACT rates from the CPWD DSR rate table provided in your instructions — do NOT modify or round them. For EVERY item: cite the exact DSR reference code, show measurement basis per IS 1200, reference applicable specification, and mark confirmed vs assumed. Quantities must show calculation breakdowns. Example: Excavation MUST be ₹398/m³ [DSR 2.1]. PCC M15 MUST be ₹5,862/m³ [DSR 4.2]. RCC M30 MUST be ₹7,894/m³ [DSR 4.9]. Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy these numbers exactly from the table.';
+      const userMsg = 'Generate a professional, contract-grade Bill of Quantities from these construction drawings. This BOQ will be reviewed by senior QS teams at major construction firms. CRITICAL: Use ONLY the EXACT rates from the CPWD DSR rate table provided in your instructions — do NOT modify or round them. For EVERY item: cite the exact DSR reference code, show measurement basis per IS 1200, reference applicable specification, and mark confirmed vs assumed. Quantities must show calculation breakdowns. Example: Excavation MUST be ₹398/m³ [DSR 2.1]. PCC M15 MUST be ₹5,862/m³ [DSR 4.2]. RCC M30 MUST be ₹7,894/m³ [DSR 4.9]. Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy these numbers exactly from the table. Return a JSON OBJECT (not array) with drawingAnalysis, items, gaps, and consultantQuestions fields.';
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
-      const items: BOMItem[] = (Array.isArray(parsed) ? parsed : (parsed.items || [])).map((item: any) => ({
+      const rawItems = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const items: BOMItem[] = rawItems.map((item: any) => ({
         ...item,
         quantity: Number(item.quantity) || 0,
         unitRate: Number(item.unitRate) || 0,
@@ -108,7 +156,12 @@ ALL rates MUST be in INR.`;
         measurementBasis: item.measurementBasis || '',
         confirmed: item.confirmed !== false
       }));
-      setData(items);
+      setData({
+        drawingAnalysis: parsed.drawingAnalysis || undefined,
+        items,
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || []
+      });
       onStatusChange('complete');
     } catch (e: any) {
       setError(e.message);
@@ -117,9 +170,10 @@ ALL rates MUST be in INR.`;
     }
   };
 
-  const trades = useMemo(() => [...new Set(data.map(d => d.trade))].sort(), [data]);
+  const items = data?.items || [];
+  const trades = useMemo(() => [...new Set(items.map(d => d.trade))].sort(), [items]);
 
-  const filtered = data.filter(item => {
+  const filtered = items.filter(item => {
     const matchSearch = searchTerm === '' ||
       item.item.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -130,13 +184,13 @@ ALL rates MUST be in INR.`;
 
   const tradeSubtotals = useMemo(() => {
     const map: Record<string, number> = {};
-    data.forEach(item => {
+    items.forEach(item => {
       map[item.trade] = (map[item.trade] || 0) + item.total;
     });
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [data]);
+  }, [items]);
 
-  const grandTotal = useMemo(() => data.reduce((sum, item) => sum + item.total, 0), [data]);
+  const grandTotal = useMemo(() => items.reduce((sum, item) => sum + item.total, 0), [items]);
 
   const exportPDF = () => {
     const sections: PDFSection[] = [];
@@ -144,7 +198,7 @@ ALL rates MUST be in INR.`;
       type: 'table',
       title: 'Bill of Materials',
       headers: ['Trade', 'Item', 'Description', 'Qty', 'Unit', 'Rate', 'Rate Source', 'Total', 'Status'],
-      rows: data.map(item => [
+      rows: items.map(item => [
         String(item.trade ?? ''),
         String(item.item ?? ''),
         String(item.description ?? ''),
@@ -156,7 +210,7 @@ ALL rates MUST be in INR.`;
         item.confirmed ? 'Confirmed' : 'Estimated'
       ]),
       summary: [
-        { label: 'Line Items', value: String(data.length) },
+        { label: 'Line Items', value: String(items.length) },
         { label: 'Trades', value: String(trades.length) },
         { label: 'Grand Total', value: fmtC(grandTotal) }
       ]
@@ -167,7 +221,7 @@ ALL rates MUST be in INR.`;
       headers: ['Trade', 'Items', 'Subtotal', '% of Total'],
       rows: tradeSubtotals.map(([trade, subtotal]) => [
         String(trade),
-        String(data.filter(d => d.trade === trade).length),
+        String(items.filter(d => d.trade === trade).length),
         fmtC(subtotal),
         grandTotal > 0 ? `${((subtotal / grandTotal) * 100).toFixed(1)}%` : '0%'
       ]),
@@ -183,7 +237,7 @@ ALL rates MUST be in INR.`;
   };
 
   const exportCSV = () => {
-    const rows = data.map(item => ({
+    const rows = items.map(item => ({
       Trade: item.trade,
       Item: item.item,
       Description: item.description,
@@ -198,6 +252,11 @@ ALL rates MUST be in INR.`;
     }));
     downloadCSV(rows, 'bill-of-materials.csv');
   };
+
+  const badgeStyle = (bg: string, color: string, extra?: React.CSSProperties): React.CSSProperties => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+    background: bg, color, ...extra
+  });
 
   return (
     <div>
@@ -218,7 +277,7 @@ ALL rates MUST be in INR.`;
         </div>
       )}
 
-      {data.length === 0 && !loading && (
+      {!data && !loading && (
         <div style={empty}>
           <Package size={40} color={C.tx3} style={{ marginBottom: 8 }} />
           <p style={{ fontWeight: 600, color: C.tx }}>No bill of materials generated yet</p>
@@ -237,7 +296,7 @@ ALL rates MUST be in INR.`;
         </div>
       )}
 
-      {data.length > 0 && !loading && (
+      {data && !loading && (
         <>
           {/* Toolbar */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -269,10 +328,81 @@ ALL rates MUST be in INR.`;
             </button>
           </div>
 
+          {/* Drawing Analysis Card */}
+          {data.drawingAnalysis && (
+            <div style={{...card, border:'2px solid #2563eb', background:'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#2563eb'}}>📐 Drawing Analysis</h3>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+                <p style={{margin:0}}><strong>Drawing Type:</strong> {data.drawingAnalysis.drawingType}</p>
+                <p style={{margin:0}}><strong>Building Type:</strong> {data.drawingAnalysis.buildingType}</p>
+              </div>
+              {data.drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Visible Elements:</strong>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'4px'}}>
+                    {data.drawingAnalysis.visibleElements.map((e:string,i:number) => (
+                      <span key={i} style={badgeStyle('#dbeafe','#1e40af')}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Readable Dimensions:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.readableDimensions.map((d:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Specifications on Drawing:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.specsOnDrawing.map((s:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.scale && <p style={{marginTop:'4px',marginBottom:0}}><strong>Scale:</strong> {data.drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
+          {/* Gaps Section */}
+          {data.gaps && data.gaps.length > 0 && (
+            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#d97706'}}>⚠️ Gaps & Missing Information ({data.gaps.length})</h3>
+              {data.gaps.map((g:any,i:number) => (
+                <div key={i} style={{padding:'8px 0',borderBottom:i<(data.gaps?.length||0)-1?'1px solid #fde68a':'none',display:'flex',gap:'8px',alignItems:'flex-start'}}>
+                  <span style={badgeStyle(g.priority==='HIGH'?'#ef4444':g.priority==='MEDIUM'?'#f59e0b':'#3b82f6','#fff',{flexShrink:0,minWidth:'55px',textAlign:'center'})}>{g.priority}</span>
+                  <span style={{fontSize:'13px'}}>{g.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Consultant Questions Section */}
+          {data.consultantQuestions && data.consultantQuestions.length > 0 && (
+            <div style={{...card, border:'2px solid #7c3aed', background:'#f5f3ff', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#7c3aed'}}>💬 Stakeholder Questions ({data.consultantQuestions.length})</h3>
+              {['Architect','Structural Engineer','MEP Consultant','QS/Cost Consultant'].map(role => {
+                const qs = (data.consultantQuestions || []).filter((q:any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{marginBottom:'12px'}}>
+                    <h4 style={{fontWeight:600,color:'#4c1d95',margin:'8px 0 4px',fontSize:'14px'}}>{role}</h4>
+                    {qs.map((q:any,i:number) => (
+                      <div key={i} style={{padding:'6px 8px',borderBottom:'1px solid #e9e5f5',display:'flex',gap:'6px',alignItems:'flex-start'}}>
+                        <span style={badgeStyle(q.priority==='HIGH'?'#ef4444':'#f59e0b','#fff',{flexShrink:0})}>{q.priority}</span>
+                        <div><span style={{fontSize:'13px'}}>{q.question}</span>
+                          {q.impactArea && <span style={{fontSize:'11px',color:'#6b7280',marginLeft:'8px'}}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
             <div style={{ ...card, flex: 1, minWidth: 130, padding: '12px 16px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: C.primary }}>{data.length}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.primary }}>{items.length}</div>
               <div style={{ fontSize: 12, color: C.tx3 }}>Line Items</div>
             </div>
             <div style={{ ...card, flex: 1, minWidth: 130, padding: '12px 16px', textAlign: 'center' }}>
@@ -303,7 +433,7 @@ ALL rates MUST be in INR.`;
               </thead>
               <tbody>
                 {filtered.map((item, i) => (
-                  <tr key={i} style={{ background: item.confirmed ? 'transparent' : '#fffbeb' }}>
+                  <tr key={i} style={{ background: item.confirmed === false ? '#fef9c3' : 'transparent' }}>
                     <td style={td}>
                       <span style={badge(C.primary, C.infoBg)}>{item.trade}</span>
                     </td>
@@ -325,7 +455,7 @@ ALL rates MUST be in INR.`;
           </div>
 
           <div style={{ marginTop: 8, fontSize: 12, color: C.tx3 }}>
-            Showing {filtered.length} of {data.length} items • {data.filter(d => d.confirmed).length} confirmed from drawings, {data.filter(d => !d.confirmed).length} estimated
+            Showing {filtered.length} of {items.length} items • {items.filter(d => d.confirmed).length} confirmed from drawings, {items.filter(d => !d.confirmed).length} estimated
           </div>
 
           {/* Cost Summary */}
@@ -347,14 +477,14 @@ ALL rates MUST be in INR.`;
                 {tradeSubtotals.map(([trade, subtotal]) => (
                   <tr key={trade}>
                     <td style={{ ...td, fontWeight: 600 }}>{trade}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>{data.filter(d => d.trade === trade).length}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>{items.filter(d => d.trade === trade).length}</td>
                     <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>{fmtC(subtotal)}</td>
                     <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>{grandTotal > 0 ? ((subtotal / grandTotal) * 100).toFixed(1) : 0}%</td>
                   </tr>
                 ))}
                 <tr style={{ background: C.bgD }}>
                   <td style={{ ...td, fontWeight: 700 }}>Grand Total</td>
-                  <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{data.length}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{items.length}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700, fontFamily: 'monospace', fontSize: 15 }}>{fmtC(grandTotal)}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>100%</td>
                 </tr>

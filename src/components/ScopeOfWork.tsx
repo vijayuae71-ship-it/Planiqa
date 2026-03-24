@@ -16,44 +16,44 @@ interface Props {
 interface ScopeItem {
   division: string;
   divisionName: string;
+  code?: string;
   trade: string;
+  title?: string;
   description: string;
   specification: string;
   measurementBasis: string;
   notes: string;
   confirmed: boolean;
+  assumptionBasis?: string;
 }
 
-interface ScopeGap {
-  priority: string;
-  description: string;
-  discipline: string;
-  actionRequired: string;
-}
-
-interface ScopeClarification {
-  question: string;
-  directedTo: string;
-  reason: string;
-}
-
-interface ScopeResult {
+interface ScopeData {
+  drawingAnalysis?: {
+    drawingType: string;
+    buildingType: string;
+    visibleElements: string[];
+    readableDimensions: string[];
+    specsOnDrawing: string[];
+    scale: string;
+  };
   items: ScopeItem[];
-  gaps: ScopeGap[];
-  clarifications: ScopeClarification[];
-  drawingSummary: string;
+  gaps: { priority: string; description: string; discipline?: string; actionRequired?: string }[];
+  consultantQuestions: { to: string; question: string; priority: string; impactArea?: string }[];
+  drawingSummary?: string;
 }
 
 export const ScopeOfWork: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKey, onStatusChange }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [data, setData] = useState<ScopeItem[]>([]);
-  const [gaps, setGaps] = useState<ScopeGap[]>([]);
-  const [clarifications, setClarifications] = useState<ScopeClarification[]>([]);
-  const [drawingSummary, setDrawingSummary] = useState('');
+  const [data, setData] = useState<ScopeData | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [divisionFilter, setDivisionFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<'scope' | 'gaps' | 'clarifications'>('scope');
+  const [activeTab, setActiveTab] = useState<'scope' | 'gaps' | 'questions'>('scope');
+
+  const items = data?.items || [];
+  const gaps = data?.gaps || [];
+  const consultantQuestions = data?.consultantQuestions || [];
+  const drawingAnalysis = data?.drawingAnalysis;
 
   const generate = async () => {
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
@@ -61,16 +61,32 @@ export const ScopeOfWork: React.FC<Props> = ({ drawings, selectedDrawingIds, api
     setLoading(true);
     setError('');
     try {
-      const systemPrompt = `You are a senior construction scope of work specialist and pre-contract QS at a Tier-1 EPC contractor. You prepare scope documents that are submitted to clients like L&T Construction, Sobha Realty, Danube Properties, and Nagarjuna Construction. Your scope documents MUST be accurate, comprehensive, and suitable for tender/contract inclusion.
+      const systemPrompt = `You are a senior construction scope of work specialist and pre-contract QS at a Tier-1 EPC contractor. You prepare scope documents submitted to clients like L&T Construction, Sobha Realty, Danube Properties, and Nagarjuna Construction. Your scope documents MUST be accurate, comprehensive, and suitable for tender/contract inclusion.
+
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY scope data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY scope item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source in notes: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type. State your assumption in assumptionBasis: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — SCOPE ITEM GENERATION (CSI MasterFormat Divisions 01-35):
+Generate scope items for CSI Divisions 01-35. Only include items evidenced by the drawing or standard practice for the identified building type.
 
 SCOPE DEVELOPMENT METHODOLOGY:
-1. First IDENTIFY the drawing type and discipline (Architectural/Structural/MEP/Civil)
-2. INVENTORY every element visible in the drawing with labels, dimensions, specifications
-3. MAP each element to CSI MasterFormat 2020 divisions (01-35)
-4. For each scope item, define: WHAT is to be done, WHERE, HOW (specification/standard), and MEASUREMENT BASIS
-5. SEPARATE confirmed items (visible in drawing) from assumed items (standard practice)
-6. IDENTIFY gaps — what's missing from the drawings that is needed for a complete scope
-7. GENERATE clarification questions for the design team
+1. INVENTORY every element visible in the drawing with labels, dimensions, specifications
+2. MAP each element to CSI MasterFormat 2020 divisions (01-35)
+3. For each scope item, define: WHAT is to be done, WHERE, HOW (specification/standard), and MEASUREMENT BASIS
+4. SEPARATE confirmed items (visible in drawing) from assumed items (standard practice)
 
 CRITICAL ACCURACY RULES:
 - Quantities and dimensions: ONLY from what is measurable in the drawings
@@ -87,22 +103,37 @@ IMPORTANT — GENERATE 30-60+ SCOPE ITEMS for a typical drawing. Be thorough. Co
 - External works visible (paving, landscaping, drainage)
 - Applicable testing and commissioning
 
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for a complete scope. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+For each gap include: priority, description, discipline (Structural/Architectural/MEP/Civil), actionRequired
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"...", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
 Return JSON object format:
-{"drawingSummary":"Brief description of what the drawing shows and its scope implications","items":[{"division":"03","divisionName":"Concrete","trade":"Concrete Contractor","description":"Supply, place, finish and cure Grade C30/37 (M30) ready-mix concrete to isolated pad foundations F1-F6 as per structural layout. Includes formwork, curing compound, and concrete testing per IS 456:2000 / ACI 318-19.","specification":"IS 456:2000 Cl.8 / ACI 318-19. Mix design to be approved. Minimum cement content 320 kg/m³.","measurementBasis":"Measured in m³ as placed per IS 1200 Part 2. Formwork measured separately in m².","notes":"Foundation sizes from structural drawing. Concrete grade assumed M30 — verify with structural consultant.","confirmed":true}],"gaps":[{"priority":"Critical","description":"No structural drawing provided — foundation sizes, beam depths, and reinforcement details cannot be confirmed","discipline":"Structural","actionRequired":"Request structural GA and foundation layout from structural consultant before finalizing scope"},{"priority":"High","description":"Door and window schedule not provided — sizes estimated from plan dimensions","discipline":"Architectural","actionRequired":"Request door/window schedule from architect with hardware specifications"}],"clarifications":[{"question":"What is the specified concrete grade for foundations and superstructure? Drawing shows M30 notation but structural specification is needed for mix design approval.","directedTo":"Structural Engineer","reason":"Required for concrete procurement and mix design submission"},{"question":"Are the partition walls in the lobby area load-bearing or non-load-bearing? This affects the construction sequence and structural temporary works.","directedTo":"Architect / Structural Engineer","reason":"Impacts scope of temporary propping and construction methodology"}]}`;
-      const userMsg = 'Analyze these construction drawings and generate a comprehensive, contract-grade scope of work. This will be reviewed by project directors at major construction firms. For each item: specify the work clearly enough for subcontractor pricing, reference applicable standards, and state measurement basis. Identify ALL gaps in the drawings that prevent complete scoping, prioritized as Critical/High/Medium/Low. Generate specific clarification questions for the architect, structural engineer, MEP consultant, and QS.';
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["walls","columns","beams"],"readableDimensions":["Overall: 45m x 30m"],"specsOnDrawing":["M30 concrete noted"],"scale":"1:100"},"drawingSummary":"Brief description of what the drawing shows and its scope implications","items":[{"division":"03","divisionName":"Concrete","code":"03 30 00","trade":"Concrete Contractor","title":"Cast-in-Place Concrete","description":"Supply, place, finish and cure Grade C30/37 (M30) ready-mix concrete to isolated pad foundations F1-F6 as per structural layout.","specification":"IS 456:2000 Cl.8 / ACI 318-19. Mix design to be approved.","measurementBasis":"Measured in m³ as placed per IS 1200 Part 2.","notes":"Foundation sizes from structural drawing.","confirmed":true,"assumptionBasis":""}],"gaps":[{"priority":"HIGH","description":"No structural drawing provided — foundation sizes cannot be confirmed","discipline":"Structural","actionRequired":"Request structural GA from structural consultant"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}`;
+      const userMsg = 'Analyze these construction drawings and generate a comprehensive, contract-grade scope of work. This will be reviewed by project directors at major construction firms. For each item: specify the work clearly enough for subcontractor pricing, reference applicable standards, and state measurement basis. Identify ALL gaps in the drawings that prevent complete scoping. Generate specific RFI questions for the architect, structural engineer, MEP consultant, and QS.';
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
       if (Array.isArray(parsed)) {
-        setData(parsed);
-        setGaps([]);
-        setClarifications([]);
-        setDrawingSummary('');
+        setData({ items: parsed, gaps: [], consultantQuestions: [] });
       } else {
-        setData(parsed.items || []);
-        setGaps(parsed.gaps || []);
-        setClarifications(parsed.clarifications || []);
-        setDrawingSummary(parsed.drawingSummary || '');
+        setData({
+          drawingAnalysis: parsed.drawingAnalysis || undefined,
+          items: parsed.items || [],
+          gaps: parsed.gaps || [],
+          consultantQuestions: parsed.consultantQuestions || [],
+          drawingSummary: parsed.drawingSummary || ''
+        });
       }
       onStatusChange('complete');
     } catch (e: any) {
@@ -112,9 +143,9 @@ Return JSON object format:
     }
   };
 
-  const divisions = [...new Set(data.map(d => d.division))].sort();
+  const divisions = [...new Set(items.map(d => d.division))].sort();
 
-  const filtered = data.filter(item => {
+  const filtered = items.filter(item => {
     const matchSearch = searchTerm === '' ||
       item.divisionName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.trade.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -129,53 +160,70 @@ Return JSON object format:
     text += '                    PlanIQ — AI Drawing Intelligence\n';
     text += '═══════════════════════════════════════════════════════════════\n\n';
     text += `Generated: ${new Date().toLocaleDateString()}\n`;
-    text += `Total Divisions: ${divisions.length} | Total Items: ${data.length}\n`;
-    text += `Confirmed Items: ${data.filter(d => d.confirmed).length} | Assumptions: ${data.filter(d => !d.confirmed).length}\n`;
-    if (drawingSummary) text += `\nDrawing Summary: ${drawingSummary}\n`;
+    text += `Total Divisions: ${divisions.length} | Total Items: ${items.length}\n`;
+    text += `Confirmed Items: ${items.filter(d => d.confirmed).length} | Assumptions: ${items.filter(d => !d.confirmed).length}\n`;
+    if (data?.drawingSummary) text += `\nDrawing Summary: ${data.drawingSummary}\n`;
+    if (drawingAnalysis) {
+      text += `\nDRAWING ANALYSIS:\n`;
+      text += `  Drawing Type: ${drawingAnalysis.drawingType}\n`;
+      text += `  Building Type: ${drawingAnalysis.buildingType}\n`;
+      if (drawingAnalysis.scale) text += `  Scale: ${drawingAnalysis.scale}\n`;
+      if (drawingAnalysis.visibleElements?.length) text += `  Visible Elements: ${drawingAnalysis.visibleElements.join(', ')}\n`;
+      if (drawingAnalysis.readableDimensions?.length) {
+        text += `  Readable Dimensions:\n`;
+        drawingAnalysis.readableDimensions.forEach(d => { text += `    • ${d}\n`; });
+      }
+    }
     text += '\n' + '─'.repeat(60) + '\n';
     text += 'SECTION 1: SCOPE ITEMS BY CSI DIVISION\n';
     text += '─'.repeat(60) + '\n';
     const grouped: Record<string, ScopeItem[]> = {};
-    data.forEach(item => {
+    items.forEach(item => {
       const key = `Division ${item.division} — ${item.divisionName}`;
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(item);
     });
-    Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).forEach(([div, items]) => {
+    Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).forEach(([div, ditems]) => {
       text += `\n${div}\n${'─'.repeat(40)}\n`;
-      items.forEach((item, i) => {
+      ditems.forEach((item, i) => {
         text += `\n  ${i + 1}. [${item.confirmed ? 'CONFIRMED' : 'ASSUMED'}] Trade: ${item.trade}\n`;
         text += `     Description: ${item.description}\n`;
         if (item.specification) text += `     Specification: ${item.specification}\n`;
         if (item.measurementBasis) text += `     Measurement: ${item.measurementBasis}\n`;
         if (item.notes) text += `     Notes: ${item.notes}\n`;
+        if (item.assumptionBasis) text += `     Assumption Basis: ${item.assumptionBasis}\n`;
       });
     });
     if (gaps.length > 0) {
       text += '\n\n' + '─'.repeat(60) + '\n';
       text += 'SECTION 2: INFORMATION GAPS (PRIORITY ORDER)\n';
       text += '─'.repeat(60) + '\n\n';
-      const priorityOrder = ['Critical', 'High', 'Medium', 'Low'];
-      priorityOrder.forEach(p => {
+      ['HIGH', 'MEDIUM', 'LOW'].forEach(p => {
         const pGaps = gaps.filter(g => g.priority === p);
         if (pGaps.length > 0) {
-          text += `  [${p.toUpperCase()}]\n`;
+          text += `  [${p}]\n`;
           pGaps.forEach((g, i) => {
             text += `  ${i + 1}. ${g.description}\n`;
-            text += `     Discipline: ${g.discipline}\n`;
-            text += `     Action: ${g.actionRequired}\n\n`;
+            if (g.discipline) text += `     Discipline: ${g.discipline}\n`;
+            if (g.actionRequired) text += `     Action: ${g.actionRequired}\n\n`;
           });
         }
       });
     }
-    if (clarifications.length > 0) {
+    if (consultantQuestions.length > 0) {
       text += '\n' + '─'.repeat(60) + '\n';
-      text += 'SECTION 3: CLARIFICATIONS REQUIRED\n';
+      text += 'SECTION 3: STAKEHOLDER QUESTIONS / RFIs\n';
       text += '─'.repeat(60) + '\n\n';
-      clarifications.forEach((c, i) => {
-        text += `  ${i + 1}. TO: ${c.directedTo}\n`;
-        text += `     Q: ${c.question}\n`;
-        text += `     Reason: ${c.reason}\n\n`;
+      ['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].forEach(role => {
+        const qs = consultantQuestions.filter(q => q.to === role);
+        if (qs.length > 0) {
+          text += `  TO: ${role}\n`;
+          qs.forEach((q, i) => {
+            text += `  ${i + 1}. [${q.priority}] ${q.question}\n`;
+            if (q.impactArea) text += `     Impact: ${q.impactArea}\n`;
+            text += '\n';
+          });
+        }
       });
     }
     text += '\n' + '═'.repeat(60) + '\n';
@@ -186,18 +234,21 @@ Return JSON object format:
 
   const exportPDF = () => {
     const sections: PDFSection[] = [];
-    if (drawingSummary) {
-      sections.push({
-        type: 'text',
-        title: 'Drawing Summary',
-        content: drawingSummary
-      });
+    if (drawingAnalysis) {
+      let daText = `Drawing Type: ${drawingAnalysis.drawingType}\nBuilding Type: ${drawingAnalysis.buildingType}\n`;
+      if (drawingAnalysis.scale) daText += `Scale: ${drawingAnalysis.scale}\n`;
+      if (drawingAnalysis.visibleElements?.length) daText += `Visible Elements: ${drawingAnalysis.visibleElements.join(', ')}\n`;
+      if (drawingAnalysis.readableDimensions?.length) daText += `Dimensions: ${drawingAnalysis.readableDimensions.join('; ')}\n`;
+      sections.push({ type: 'text', title: 'Drawing Analysis', content: daText });
+    }
+    if (data?.drawingSummary) {
+      sections.push({ type: 'text', title: 'Drawing Summary', content: data.drawingSummary });
     }
     sections.push({
       type: 'table',
       title: 'Scope Items',
       headers: ['Div', 'Division', 'Trade', 'Description', 'Specification', 'Measurement', 'Status'],
-      rows: data.map(item => [
+      rows: items.map(item => [
         String(item.division ?? ''),
         String(item.divisionName ?? ''),
         String(item.trade ?? ''),
@@ -207,9 +258,9 @@ Return JSON object format:
         item.confirmed ? 'Confirmed' : 'Assumed'
       ]),
       summary: [
-        { label: 'Total Items', value: String(data.length) },
-        { label: 'Confirmed', value: String(data.filter(d => d.confirmed).length) },
-        { label: 'Assumed', value: String(data.filter(d => !d.confirmed).length) }
+        { label: 'Total Items', value: String(items.length) },
+        { label: 'Confirmed', value: String(items.filter(d => d.confirmed).length) },
+        { label: 'Assumed', value: String(items.filter(d => !d.confirmed).length) }
       ]
     });
     if (gaps.length > 0) {
@@ -225,15 +276,16 @@ Return JSON object format:
         ])
       });
     }
-    if (clarifications.length > 0) {
+    if (consultantQuestions.length > 0) {
       sections.push({
         type: 'table',
-        title: 'Clarifications / RFIs',
-        headers: ['Directed To', 'Question', 'Reason'],
-        rows: clarifications.map(c => [
-          String(c.directedTo ?? ''),
-          String(c.question ?? ''),
-          String(c.reason ?? '')
+        title: 'Stakeholder Questions / RFIs',
+        headers: ['Directed To', 'Question', 'Priority', 'Impact Area'],
+        rows: consultantQuestions.map(q => [
+          String(q.to ?? ''),
+          String(q.question ?? ''),
+          String(q.priority ?? ''),
+          String(q.impactArea ?? '')
         ])
       });
     }
@@ -263,7 +315,7 @@ Return JSON object format:
         </div>
       )}
 
-      {data.length === 0 && !loading && (
+      {!data && !loading && (
         <div style={empty}>
           <ClipboardList size={40} color={C.tx3} style={{ marginBottom: 8 }} />
           <p style={{ fontWeight: 600, color: C.tx }}>No scope of work generated yet</p>
@@ -282,7 +334,7 @@ Return JSON object format:
         </div>
       )}
 
-      {data.length > 0 && !loading && (
+      {data && !loading && (
         <>
           {/* Toolbar */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -299,7 +351,7 @@ Return JSON object format:
             <select value={divisionFilter} onChange={e => setDivisionFilter(e.target.value)} style={sel}>
               <option value="all">All Divisions</option>
               {divisions.map(d => {
-                const item = data.find(i => i.division === d);
+                const item = items.find(i => i.division === d);
                 return <option key={d} value={d}>Div {d} — {item?.divisionName}</option>;
               })}
             </select>
@@ -314,12 +366,83 @@ Return JSON object format:
             </button>
           </div>
 
+          {/* Drawing Analysis Card */}
+          {drawingAnalysis && (
+            <div style={{ ...card, border: '2px solid #2563eb', background: 'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#2563eb' }}>📐 Drawing Analysis</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <p style={{ margin: 0 }}><strong>Drawing Type:</strong> {drawingAnalysis.drawingType}</p>
+                <p style={{ margin: 0 }}><strong>Building Type:</strong> {drawingAnalysis.buildingType}</p>
+              </div>
+              {drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Visible Elements:</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                    {drawingAnalysis.visibleElements.map((e: string, i: number) => (
+                      <span key={i} style={badge('#1e40af', '#dbeafe')}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Readable Dimensions:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {drawingAnalysis.readableDimensions.map((d: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Specifications on Drawing:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {drawingAnalysis.specsOnDrawing.map((s: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {drawingAnalysis.scale && <p style={{ marginTop: '4px', marginBottom: 0 }}><strong>Scale:</strong> {drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
           {/* Drawing Summary */}
-          {drawingSummary && (
+          {data.drawingSummary && (
             <div style={{ ...card, marginBottom: 16, padding: '12px 16px', background: C.infoBg, border: `1px solid ${C.primary}20` }}>
               <div style={{ fontSize: 13, color: C.tx2, lineHeight: 1.5 }}>
-                <strong style={{ color: C.primary }}>📋 Drawing Summary:</strong> {drawingSummary}
+                <strong style={{ color: C.primary }}>📋 Drawing Summary:</strong> {data.drawingSummary}
               </div>
+            </div>
+          )}
+
+          {/* Gaps Section (overview) */}
+          {gaps.length > 0 && (
+            <div style={{ ...card, border: '2px solid #f59e0b', background: '#fffbeb', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#d97706' }}>⚠️ Gaps & Missing Information ({gaps.length})</h3>
+              {gaps.map((g: any, i: number) => (
+                <div key={i} style={{ padding: '8px 0', borderBottom: i < gaps.length - 1 ? '1px solid #fde68a' : 'none', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <span style={{ ...badge('#fff', g.priority === 'HIGH' ? '#ef4444' : g.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6'), flexShrink: 0, fontSize: '10px', minWidth: '55px', textAlign: 'center' as const }}>{g.priority}</span>
+                  <span style={{ fontSize: '13px' }}>{g.description}{g.discipline ? ` (${g.discipline})` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Consultant Questions Section (overview) */}
+          {consultantQuestions.length > 0 && (
+            <div style={{ ...card, border: '2px solid #7c3aed', background: '#f5f3ff', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#7c3aed' }}>💬 Stakeholder Questions ({consultantQuestions.length})</h3>
+              {['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].map(role => {
+                const qs = consultantQuestions.filter((q: any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{ marginBottom: '12px' }}>
+                    <h4 style={{ fontWeight: 600, color: '#4c1d95', margin: '8px 0 4px', fontSize: '14px' }}>{role}</h4>
+                    {qs.map((q: any, i: number) => (
+                      <div key={i} style={{ padding: '6px 8px', borderBottom: '1px solid #e9e5f5', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                        <span style={{ ...badge('#fff', q.priority === 'HIGH' ? '#ef4444' : '#f59e0b'), fontSize: '10px', flexShrink: 0 }}>{q.priority}</span>
+                        <div><span style={{ fontSize: '13px' }}>{q.question}</span>
+                          {q.impactArea && <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '8px' }}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
             </div>
           )}
 
@@ -330,11 +453,11 @@ Return JSON object format:
               <div style={{ fontSize: 12, color: C.tx3 }}>Divisions</div>
             </div>
             <div style={{ ...card, flex: 1, minWidth: 100, padding: '12px 16px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: C.purple }}>{data.length}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.purple }}>{items.length}</div>
               <div style={{ fontSize: 12, color: C.tx3 }}>Scope Items</div>
             </div>
             <div style={{ ...card, flex: 1, minWidth: 100, padding: '12px 16px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: C.ok }}>{data.filter(d => d.confirmed).length}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.ok }}>{items.filter(d => d.confirmed).length}</div>
               <div style={{ fontSize: 12, color: C.tx3 }}>Confirmed</div>
             </div>
             <div style={{ ...card, flex: 1, minWidth: 100, padding: '12px 16px', textAlign: 'center' }}>
@@ -342,7 +465,7 @@ Return JSON object format:
               <div style={{ fontSize: 12, color: C.tx3 }}>Gaps Found</div>
             </div>
             <div style={{ ...card, flex: 1, minWidth: 100, padding: '12px 16px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#ef4444' }}>{clarifications.length}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#7c3aed' }}>{consultantQuestions.length}</div>
               <div style={{ fontSize: 12, color: C.tx3 }}>RFIs Needed</div>
             </div>
           </div>
@@ -350,9 +473,9 @@ Return JSON object format:
           {/* Tab Navigation */}
           <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: `2px solid ${C.bdr}`, paddingBottom: 0 }}>
             {[
-              { key: 'scope' as const, label: `📋 Scope Items (${data.length})` },
+              { key: 'scope' as const, label: `📋 Scope Items (${items.length})` },
               { key: 'gaps' as const, label: `⚠️ Gaps (${gaps.length})` },
-              { key: 'clarifications' as const, label: `❓ Clarifications (${clarifications.length})` },
+              { key: 'questions' as const, label: `💬 RFIs (${consultantQuestions.length})` },
             ].map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
                 padding: '8px 16px', fontSize: 13, fontWeight: activeTab === tab.key ? 700 : 500,
@@ -381,7 +504,7 @@ Return JSON object format:
                   </thead>
                   <tbody>
                     {filtered.map((item, i) => (
-                      <tr key={i} style={{ background: item.confirmed ? 'transparent' : '#fffbeb' }}>
+                      <tr key={i} style={{ background: item.confirmed === false ? '#fef9c3' : 'transparent' }}>
                         <td style={td}>
                           <span style={badge(C.primary, C.infoBg)}>{item.division}</span>
                           <div style={{ fontSize: 10, color: C.tx3, marginTop: 2 }}>{item.divisionName}</div>
@@ -395,14 +518,14 @@ Return JSON object format:
                             {item.confirmed ? '✓ Confirmed' : '⚠ Assumed'}
                           </span>
                         </td>
-                        <td style={{ ...td, fontSize: 12, color: C.tx3 }}>{item.notes}</td>
+                        <td style={{ ...td, fontSize: 12, color: C.tx3 }}>{item.assumptionBasis || item.notes}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <div style={{ marginTop: 12, fontSize: 12, color: C.tx3 }}>
-                Showing {filtered.length} of {data.length} items • {data.filter(d => d.confirmed).length} confirmed, {data.filter(d => !d.confirmed).length} assumed
+                Showing {filtered.length} of {items.length} items • {items.filter(d => d.confirmed).length} confirmed, {items.filter(d => !d.confirmed).length} assumed
               </div>
             </>
           )}
@@ -414,16 +537,15 @@ Return JSON object format:
                 <div style={{ textAlign: 'center', padding: 40, color: C.tx3 }}>No gaps identified</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {['Critical', 'High', 'Medium', 'Low'].map(priority => {
+                  {['HIGH', 'MEDIUM', 'LOW'].map(priority => {
                     const pGaps = gaps.filter(g => g.priority === priority);
                     if (pGaps.length === 0) return null;
                     const colors: Record<string, { bg: string; border: string; text: string; icon: string }> = {
-                      Critical: { bg: '#fef2f2', border: '#fecaca', text: '#dc2626', icon: '🔴' },
-                      High: { bg: '#fff7ed', border: '#fed7aa', text: '#ea580c', icon: '🟠' },
-                      Medium: { bg: '#fefce8', border: '#fef08a', text: '#ca8a04', icon: '🟡' },
-                      Low: { bg: '#f0fdf4', border: '#bbf7d0', text: '#16a34a', icon: '🟢' },
+                      HIGH: { bg: '#fef2f2', border: '#fecaca', text: '#dc2626', icon: '🔴' },
+                      MEDIUM: { bg: '#fff7ed', border: '#fed7aa', text: '#ea580c', icon: '🟠' },
+                      LOW: { bg: '#f0fdf4', border: '#bbf7d0', text: '#16a34a', icon: '🟢' },
                     };
-                    const c = colors[priority] || colors.Medium;
+                    const c = colors[priority] || colors.MEDIUM;
                     return (
                       <div key={priority}>
                         <h4 style={{ fontSize: 14, fontWeight: 700, color: c.text, margin: '8px 0' }}>{c.icon} {priority} Priority ({pGaps.length})</h4>
@@ -431,7 +553,9 @@ Return JSON object format:
                           <div key={i} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px 16px', marginBottom: 8 }}>
                             <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', marginBottom: 4 }}>{gap.description}</div>
                             <div style={{ fontSize: 12, color: '#64748b' }}>
-                              <strong>Discipline:</strong> {gap.discipline} &nbsp;|&nbsp; <strong>Action:</strong> {gap.actionRequired}
+                              {gap.discipline && <><strong>Discipline:</strong> {gap.discipline}</>}
+                              {gap.discipline && gap.actionRequired && <> &nbsp;|&nbsp; </>}
+                              {gap.actionRequired && <><strong>Action:</strong> {gap.actionRequired}</>}
                             </div>
                           </div>
                         ))}
@@ -443,23 +567,32 @@ Return JSON object format:
             </div>
           )}
 
-          {/* Clarifications Tab */}
-          {activeTab === 'clarifications' && (
+          {/* Consultant Questions Tab */}
+          {activeTab === 'questions' && (
             <div>
-              {clarifications.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 40, color: C.tx3 }}>No clarifications needed</div>
+              {consultantQuestions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: C.tx3 }}>No stakeholder questions generated</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {clarifications.map((c, i) => (
-                    <div key={i} style={{ ...card, padding: '14px 16px', borderLeft: `4px solid ${C.primary}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 6 }}>
-                        <span style={badge(C.primary, C.infoBg)}>→ {c.directedTo}</span>
-                        <span style={{ fontSize: 11, color: C.tx3 }}>RFI #{i + 1}</span>
+                  {['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].map(role => {
+                    const qs = consultantQuestions.filter(q => q.to === role);
+                    if (qs.length === 0) return null;
+                    return (
+                      <div key={role}>
+                        <h4 style={{ fontSize: 14, fontWeight: 700, color: '#4c1d95', margin: '8px 0' }}>{role} ({qs.length})</h4>
+                        {qs.map((q, i) => (
+                          <div key={i} style={{ ...card, padding: '14px 16px', borderLeft: `4px solid ${q.priority === 'HIGH' ? '#ef4444' : q.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6'}`, marginBottom: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 6 }}>
+                              <span style={badge('#fff', q.priority === 'HIGH' ? '#ef4444' : q.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6')}>{q.priority}</span>
+                              <span style={{ fontSize: 11, color: C.tx3 }}>RFI</span>
+                            </div>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', marginBottom: 4, lineHeight: 1.5 }}>{q.question}</div>
+                            {q.impactArea && <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>Impact: {q.impactArea}</div>}
+                          </div>
+                        ))}
                       </div>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', marginBottom: 4, lineHeight: 1.5 }}>{c.question}</div>
-                      <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>Reason: {c.reason}</div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
