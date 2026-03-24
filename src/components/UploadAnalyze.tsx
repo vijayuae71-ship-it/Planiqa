@@ -122,7 +122,7 @@ export const UploadAnalyze: React.FC<Props> = ({ drawings, onDrawingsChange, sel
   };
 
   const analyzeSelected = async () => {
-    if (!apiKey) { setError('Configure API key in Settings first'); return; }
+    // API key handled by serverless function
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the checkboxes first'); return; }
     setAnalyzing(true);

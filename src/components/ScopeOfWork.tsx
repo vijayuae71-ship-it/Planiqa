@@ -55,7 +55,7 @@ export const ScopeOfWork: React.FC<Props> = ({ drawings, selectedDrawingIds, api
   const [activeTab, setActiveTab] = useState<'scope' | 'gaps' | 'clarifications'>('scope');
 
   const generate = async () => {
-    if (!apiKey) { setError('Configure API key in Settings first'); return; }
+    // API key handled by serverless function
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);

@@ -92,7 +92,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const fmtC = (val: number) => `${sym} ${fmt(conv(val))}`;
 
   const generate = async () => {
-    if (!apiKey) { setError('Configure API key in Settings first'); return; }
+    // API key handled by serverless function
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true); setError('');

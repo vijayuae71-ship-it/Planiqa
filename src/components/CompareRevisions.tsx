@@ -91,7 +91,7 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
   const allDrawings = drawings;
 
   const compare = async () => {
-    if (!apiKey) { setError('Configure API key in Settings first'); return; }
+    // API key handled by serverless function
     if (!revA || !revB) { setError('Select both Revision A and Revision B'); return; }
     if (revA === revB) { setError('Please select two different drawings to compare'); return; }
 
