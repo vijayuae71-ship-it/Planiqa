@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnSm, sel, tbl, th, td, secTitle, empty, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
 
 interface Props {
@@ -92,7 +93,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const fmtC = (val: number) => `${sym} ${fmt(conv(val))}`;
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true); setError('');
@@ -178,6 +179,60 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
     downloadCSV(rows, 'material-takeoff');
   };
 
+  const exportPDF = () => {
+    if (items.length === 0) return;
+    const sections: PDFSection[] = [];
+
+    // Category summary
+    if (categorySubtotals.length > 0) {
+      sections.push({
+        type: 'keyvalue',
+        title: 'Category Summary',
+        items: [
+          ...categorySubtotals.map(([cat, total]) => ({
+            label: cat,
+            value: fmtC(total),
+          })),
+          { label: 'Grand Total', value: fmtC(items.reduce((s, i) => s + lineTotal(i), 0)) },
+          { label: 'Total Items', value: String(items.length) },
+          { label: 'Currency', value: currency },
+        ],
+      });
+    }
+
+    // MTO Items table
+    const exportItems = categoryFilter === 'All' ? items : filteredItems;
+    sections.push({
+      type: 'table',
+      title: `Material Take-Off Details${categoryFilter !== 'All' ? ` — ${categoryFilter}` : ''}`,
+      headers: ['Category', 'Item', 'Description', 'Specification', 'Qty', 'Unit', 'Waste %', 'Adj. Qty', 'Unit Rate', 'Rate Source', 'Total'],
+      rows: exportItems.map(i => [
+        String(i.category ?? ''),
+        String(i.item ?? ''),
+        String(i.description ?? ''),
+        String(i.specification ?? ''),
+        String(fmt(i.quantity)),
+        String(i.unit ?? ''),
+        `${i.wasteFactor}%`,
+        String(fmt(adjustedQty(i))),
+        fmtC(i.unitRate),
+        String(i.rateSource ?? ''),
+        fmtC(lineTotal(i)),
+      ]),
+      summary: [
+        { label: categoryFilter !== 'All' ? `${categoryFilter} Subtotal` : 'Grand Total', value: fmtC(grandTotal) },
+        { label: 'Confirmed', value: String(exportItems.filter(i => i.confirmed).length) },
+        { label: 'Estimated', value: String(exportItems.filter(i => !i.confirmed).length) },
+      ],
+    });
+
+    generatePDF({
+      title: 'Material Take-Off Report',
+      module: 'Module 8: Material Take-Off',
+      sections,
+    });
+  };
+
   return (
     <div>
       {/* Header */}
@@ -211,6 +266,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
                   {Object.keys(EXCHANGE_RATES).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
+              <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
               <button style={btnSm} onClick={exportCSV}><Download size={14} /> Export CSV</button>
             </>
           )}

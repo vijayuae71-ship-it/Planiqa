@@ -3,6 +3,7 @@ import { FileCheck, Plus, Edit2, Trash2, Download, Filter, BarChart3, X } from '
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, tbl, th, td, badge, statusBadge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface ModuleProps {
   drawings: Drawing[];
@@ -93,6 +94,47 @@ export const AsBuiltTracker: React.FC<ModuleProps> = ({ onStatusChange }) => {
     downloadCSV(rows, 'as-built-tracker');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Summary',
+      items: [
+        { label: 'Total Drawings', value: String(items.length) },
+        { label: 'Verified', value: String(totalVerified) },
+        { label: 'In Progress', value: String(totalInProgress) },
+        { label: 'Pending', value: String(totalPending) },
+        { label: 'Avg Completion', value: `${avgCompletion}%` },
+      ],
+    });
+    sections.push({
+      type: 'table',
+      title: 'As-Built Drawings',
+      headers: ['Drawing No.', 'Title', 'Discipline', 'Revision', 'Status', 'Verified By', 'Date', 'Completion %', 'Revision History'],
+      rows: items.map(i => [
+        String(i.drawingNumber ?? ''),
+        String(i.title ?? ''),
+        String(i.discipline ?? ''),
+        String(i.revision ?? ''),
+        String(i.status ?? ''),
+        String(i.verifiedBy ?? ''),
+        String(i.date ?? ''),
+        `${String(i.completion ?? 0)}%`,
+        String((i.revisionHistory ?? []).join(' → ')),
+      ]),
+      summary: [
+        { label: 'Total', value: String(items.length) },
+        { label: 'Verified', value: String(totalVerified) },
+        { label: 'Avg Completion', value: `${avgCompletion}%` },
+      ],
+    });
+    generatePDF({
+      title: 'As-Built Tracker Report',
+      module: 'Module 11: As-Built Tracker',
+      sections,
+    });
+  };
+
   const completionBarColor = (pct: number) => pct >= 80 ? C.ok : pct >= 50 ? C.warn : pct >= 20 ? '#f59e0b' : C.err;
 
   return (
@@ -109,6 +151,7 @@ export const AsBuiltTracker: React.FC<ModuleProps> = ({ onStatusChange }) => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
           <button style={btnS} onClick={exportCSV}><Download size={14} /> Export CSV</button>
           <button style={btnP} onClick={openAdd}><Plus size={14} /> Add Drawing</button>
         </div>

@@ -3,6 +3,7 @@ import { FileCheck, Plus, Download, Edit3, Trash2, Search, X } from 'lucide-reac
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, tbl, th, td, statusBadge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -135,6 +136,46 @@ export const SubmittalLog: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
     downloadCSV(rows, 'submittal-log');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Summary',
+      items: [
+        { label: 'Total Submittals', value: String(stats.total) },
+        { label: 'Pending', value: String(stats.pending) },
+        { label: 'Approved', value: String(stats.approved) },
+        { label: 'Overdue', value: String(stats.overdue) },
+      ],
+    });
+    sections.push({
+      type: 'table',
+      title: 'Submittal Log',
+      headers: ['#', 'Title', 'Trade', 'Type', 'Status', 'Submitted', 'Required', 'Reviewer', 'Notes'],
+      rows: items.map(i => [
+        String(i.number ?? ''),
+        String(i.title ?? ''),
+        String(i.trade ?? ''),
+        String(i.type ?? ''),
+        String(i.status ?? ''),
+        String(i.submittedDate ?? ''),
+        String(i.requiredDate ?? ''),
+        String(i.reviewer ?? ''),
+        String(i.notes ?? ''),
+      ]),
+      summary: [
+        { label: 'Total', value: String(items.length) },
+        { label: 'Approved', value: String(stats.approved) },
+        { label: 'Overdue', value: String(stats.overdue) },
+      ],
+    });
+    generatePDF({
+      title: 'Submittal Log Report',
+      module: 'Module 9: Submittal Log',
+      sections,
+    });
+  };
+
   const setField = (key: string, val: string) => setForm(prev => ({ ...prev, [key]: val }));
 
   const modalOverlay: React.CSSProperties = {
@@ -190,6 +231,7 @@ export const SubmittalLog: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
               {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
             </select>
           </div>
+          {items.length > 0 && <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>}
           {items.length > 0 && <button style={btnSm} onClick={exportCSV}><Download size={14} /> CSV</button>}
         </div>
       </div>

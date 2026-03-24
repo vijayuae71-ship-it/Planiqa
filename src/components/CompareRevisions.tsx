@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnSm, sel, tbl, th, td, badge, secTitle, empty, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadTXT } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -91,7 +92,7 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
   const allDrawings = drawings;
 
   const compare = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     if (!revA || !revB) { setError('Select both Revision A and Revision B'); return; }
     if (revA === revB) { setError('Please select two different drawings to compare'); return; }
 
@@ -173,6 +174,115 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
     downloadTXT(txt, 'revision-comparison');
   };
 
+  const exportPDF = () => {
+    if (!data) return;
+    const sections: PDFSection[] = [];
+    const dA = allDrawings.find(d => d.id === revA);
+    const dB = allDrawings.find(d => d.id === revB);
+
+    // Comparison overview
+    sections.push({
+      type: 'keyvalue',
+      title: 'Comparison Overview',
+      items: [
+        { label: 'Revision A', value: dA?.name || revA },
+        { label: 'Revision B', value: dB?.name || revB },
+        { label: 'Added', value: String(changeSummary.added) },
+        { label: 'Modified', value: String(changeSummary.modified) },
+        { label: 'Deleted', value: String(changeSummary.deleted) },
+        { label: 'Total Changes', value: String(data.changes.length) },
+      ],
+    });
+
+    // Detected Changes table
+    sections.push({
+      type: 'table',
+      title: 'Detected Changes',
+      headers: ['#', 'Area', 'Type', 'Description', 'Trade', 'Impact', 'Action Required', 'Cost Implication'],
+      rows: data.changes.map((c, i) => [
+        String(i + 1),
+        String(c.area ?? ''),
+        String(c.type ?? ''),
+        String(c.description ?? ''),
+        String(c.trade ?? ''),
+        String(c.impact ?? ''),
+        String(c.actionRequired ?? ''),
+        String(c.costImplication ?? ''),
+      ]),
+      summary: [
+        { label: 'Total Changes', value: String(data.changes.length) },
+      ],
+    });
+
+    // Trade Impact Analysis
+    if (data.tradeImpact && data.tradeImpact.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Trade Impact Analysis',
+        headers: ['Trade', '# Changes', 'Severity', 'Cost Impact'],
+        rows: data.tradeImpact.map(t => [
+          String(t.trade ?? ''),
+          String(t.changes ?? ''),
+          String(t.severity ?? ''),
+          String(t.costImpact ?? ''),
+        ]),
+      });
+    }
+
+    // Change Order Magnitude
+    if (data.changeOrderMagnitude) {
+      sections.push({
+        type: 'keyvalue',
+        title: 'Change Order Magnitude',
+        items: [
+          { label: 'Estimated Cost', value: `$${fmt(data.changeOrderMagnitude.estimated)}` },
+          { label: 'Confidence Level', value: String(data.changeOrderMagnitude.confidence ?? '') },
+          { label: 'Notes', value: String(data.changeOrderMagnitude.notes ?? '') },
+        ],
+      });
+    }
+
+    // Schedule Impact
+    if (data.scheduleImpact) {
+      sections.push({
+        type: 'text',
+        title: 'Schedule Impact Assessment',
+        content: data.scheduleImpact,
+      });
+    }
+
+    // RFIs Required
+    if (data.rfisRequired && data.rfisRequired.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'RFIs Required',
+        headers: ['#', 'Priority', 'Directed To', 'Question'],
+        rows: data.rfisRequired.map((r, i) => [
+          String(i + 1),
+          String(r.priority ?? ''),
+          String(r.directedTo ?? ''),
+          String(r.question ?? ''),
+        ]),
+      });
+    }
+
+    // Assumptions
+    if (data.assumptions && data.assumptions.length > 0) {
+      sections.push({
+        type: 'list',
+        title: 'Assumptions',
+        items: data.assumptions,
+        ordered: true,
+      });
+    }
+
+    generatePDF({
+      title: 'Revision Comparison Report',
+      module: 'Module 7: Compare Revisions',
+      sections,
+    });
+  };
+
   return (
     <div>
       {/* Header */}
@@ -248,6 +358,7 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
           <div style={{ ...card, marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={secTitle}><AlertCircle size={16} style={{ marginRight: 6 }} />Detected Changes</h3>
+              <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
               <button style={btnSm} onClick={exportTXT}><Download size={14} /> Export TXT</button>
             </div>
             <div style={{ overflowX: 'auto' }}>

@@ -3,6 +3,7 @@ import { BookOpen, Plus, Download, Edit3, Trash2, Search, X, ChevronDown, Chevro
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, secTitle, empty, uid, fmt } from '../utils/theme';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -145,6 +146,45 @@ export const SiteDiary: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKe
     downloadCSV(rows, 'site-diary');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Summary',
+      items: [
+        { label: 'Total Entries', value: String(stats.totalEntries) },
+        { label: 'Avg Workforce', value: String(stats.avgWorkforce) },
+        { label: 'Total Man-Days', value: String(stats.totalWorkforce) },
+        { label: 'Delay Days', value: String(stats.delayDays) },
+      ],
+    });
+    sections.push({
+      type: 'table',
+      title: 'Site Diary Entries',
+      headers: ['Date', 'Weather', 'Temp', 'Workforce', 'Activities', 'Equipment', 'Materials Received', 'Delays', 'Notes'],
+      rows: entries.map(e => [
+        String(e.date ?? ''),
+        String(e.weather ?? ''),
+        String(e.temperature ?? ''),
+        String(e.workforceCount ?? ''),
+        String(e.activities ?? ''),
+        String(e.equipment ?? ''),
+        String(e.materialsReceived ?? ''),
+        String(e.delays ?? ''),
+        String(e.notes ?? ''),
+      ]),
+      summary: [
+        { label: 'Total Entries', value: String(entries.length) },
+        { label: 'Total Man-Days', value: String(stats.totalWorkforce) },
+      ],
+    });
+    generatePDF({
+      title: 'Site Diary Report',
+      module: 'Module 10: Site Diary',
+      sections,
+    });
+  };
+
   const setField = (key: string, val: any) => setForm(prev => ({ ...prev, [key]: val }));
 
   const formatDate = (d: string) => {
@@ -208,6 +248,7 @@ export const SiteDiary: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKe
               <option value="month">This Month</option>
             </select>
           </div>
+          {entries.length > 0 && <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>}
           {entries.length > 0 && <button style={btnSm} onClick={exportCSV}><Download size={14} /> CSV</button>}
         </div>
       </div>

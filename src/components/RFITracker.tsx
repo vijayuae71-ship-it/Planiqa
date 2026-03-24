@@ -3,6 +3,7 @@ import { MessageSquare, Plus, Edit2, Trash2, Download, Filter, ChevronDown, Chev
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, tbl, th, td, badge, statusBadge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface ModuleProps {
   drawings: Drawing[];
@@ -127,6 +128,48 @@ export const RFITracker: React.FC<ModuleProps> = ({ onStatusChange }) => {
     downloadCSV(rows, 'rfi-tracker');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Summary',
+      items: [
+        { label: 'Total RFIs', value: String(items.length) },
+        { label: 'Open', value: String(openCount) },
+        { label: 'Responded', value: String(respondedCount) },
+        { label: 'Overdue', value: String(overdue) },
+        { label: 'Avg Response Time', value: String(avgResponseTime) },
+      ],
+    });
+    sections.push({
+      type: 'table',
+      title: 'RFI Log',
+      headers: ['Number', 'Subject', 'From', 'To', 'Priority', 'Status', 'Submitted', 'Required', 'Responded', 'Response'],
+      rows: items.map(i => [
+        String(i.number ?? ''),
+        String(i.subject ?? ''),
+        String(i.from ?? ''),
+        String(i.to ?? ''),
+        String(i.priority ?? ''),
+        String(i.status ?? ''),
+        String(i.dateSubmitted ?? ''),
+        String(i.dateRequired ?? ''),
+        String(i.dateResponded ?? ''),
+        String(i.response ?? ''),
+      ]),
+      summary: [
+        { label: 'Total', value: String(items.length) },
+        { label: 'Open', value: String(openCount) },
+        { label: 'Overdue', value: String(overdue) },
+      ],
+    });
+    generatePDF({
+      title: 'RFI Tracker Report',
+      module: 'Module 12: RFI Tracker',
+      sections,
+    });
+  };
+
   const isOverdue = (item: RFIItem) => item.dateRequired && item.dateRequired < today && item.status !== 'closed';
 
   return (
@@ -143,6 +186,7 @@ export const RFITracker: React.FC<ModuleProps> = ({ onStatusChange }) => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
           <button style={btnS} onClick={exportCSV}><Download size={14} /> Export CSV</button>
           <button style={btnP} onClick={openAdd}><Plus size={14} /> Add RFI</button>
         </div>

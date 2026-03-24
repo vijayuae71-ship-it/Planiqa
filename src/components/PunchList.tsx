@@ -3,6 +3,7 @@ import { ClipboardCheck, Plus, Edit2, Trash2, Download, Filter, X, AlertTriangle
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, tbl, th, td, badge, statusBadge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface ModuleProps {
   drawings: Drawing[];
@@ -124,6 +125,56 @@ export const PunchList: React.FC<ModuleProps> = ({ onStatusChange }) => {
     downloadCSV(rows, 'punch-list');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Summary',
+      items: [
+        { label: 'Total Items', value: String(items.length) },
+        { label: 'Open', value: String(openCount) },
+        { label: 'Resolved', value: String(resolvedCount) },
+        { label: 'Verified', value: String(verifiedCount) },
+        { label: 'Completion', value: `${completionPct}%` },
+      ],
+    });
+    sections.push({
+      type: 'keyvalue',
+      title: 'Severity Breakdown',
+      items: [
+        { label: 'Critical', value: String(criticalCount) },
+        { label: 'Major', value: String(majorCount) },
+        { label: 'Minor', value: String(minorCount) },
+      ],
+    });
+    sections.push({
+      type: 'table',
+      title: 'Punch List Items',
+      headers: ['Number', 'Location', 'Description', 'Trade', 'Severity', 'Status', 'Assigned To', 'Identified', 'Resolved'],
+      rows: items.map(i => [
+        String(i.number ?? ''),
+        String(i.location ?? ''),
+        String(i.description ?? ''),
+        String(i.trade ?? ''),
+        String(i.severity ?? ''),
+        String(i.status ?? ''),
+        String(i.assignedTo ?? ''),
+        String(i.dateIdentified ?? ''),
+        String(i.dateResolved ?? ''),
+      ]),
+      summary: [
+        { label: 'Total', value: String(items.length) },
+        { label: 'Open', value: String(openCount) },
+        { label: 'Completion', value: `${completionPct}%` },
+      ],
+    });
+    generatePDF({
+      title: 'Punch List Report',
+      module: 'Module 13: Punch List',
+      sections,
+    });
+  };
+
   return (
     <div>
       {/* Header */}
@@ -138,6 +189,7 @@ export const PunchList: React.FC<ModuleProps> = ({ onStatusChange }) => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
           <button style={btnS} onClick={exportCSV}><Download size={14} /> Export CSV</button>
           <button style={btnP} onClick={openAdd}><Plus size={14} /> Add Item</button>
         </div>
