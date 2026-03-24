@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, sel, tbl, th, td, badge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -57,7 +58,7 @@ export const BarBendingSchedule: React.FC<Props> = ({ drawings, selectedDrawingI
   const [showShapeCodes, setShowShapeCodes] = useState(false);
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);
@@ -201,6 +202,71 @@ Return JSON array format:
     return Object.entries(map).sort(([a], [b]) => Number(a) - Number(b));
   }, [items]);
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'keyvalue',
+      title: 'Schedule Information',
+      items: [
+        { label: 'Standard', value: standard },
+        { label: 'Total Entries', value: String(items.length) },
+        { label: 'Total Weight (kg)', value: totalWeight.toFixed(2) },
+        { label: 'Total Weight (tonnes)', value: (totalWeight / 1000).toFixed(3) }
+      ]
+    });
+    sections.push({
+      type: 'table',
+      title: 'Bar Bending Schedule',
+      headers: ['Member', 'Bar Mark', 'Type', 'Dia(mm)', 'Shape', 'Length(mm)', 'No. Bars', 'Total Len(mm)', 'Weight(kg)', 'Status'],
+      rows: items.map(item => {
+        const tl = calcTotalLength(item.length, item.quantity);
+        const wt = calcWeight(tl, item.diameter);
+        return [
+          String(item.member ?? ''),
+          String(item.barMark ?? ''),
+          String(item.type ?? ''),
+          String(item.diameter),
+          String(item.shapeCode ?? ''),
+          String(fmt(item.length)),
+          String(item.quantity),
+          String(fmt(tl)),
+          wt.toFixed(2),
+          item.confirmed ? 'Confirmed' : 'Estimated'
+        ];
+      }),
+      summary: [
+        { label: 'Total Entries', value: String(items.length) },
+        { label: 'Total Weight', value: `${totalWeight.toFixed(2)} kg` }
+      ]
+    });
+    if (weightByDiameter.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Weight Summary by Diameter',
+        headers: ['Diameter (mm)', 'Entries', 'Total Bars', 'Weight (kg)', '% of Total'],
+        rows: weightByDiameter.map(([dia, wt]) => {
+          const diaItems = items.filter(i => i.diameter === Number(dia));
+          const totalBars = diaItems.reduce((s, i) => s + i.quantity, 0);
+          return [
+            `Ø${dia}`,
+            String(diaItems.length),
+            String(totalBars),
+            wt.toFixed(2),
+            totalWeight > 0 ? `${((wt / totalWeight) * 100).toFixed(1)}%` : '0%'
+          ];
+        }),
+        summary: [
+          { label: 'Grand Total Weight', value: `${totalWeight.toFixed(2)} kg` }
+        ]
+      });
+    }
+    generatePDF({
+      title: 'Bar Bending Schedule',
+      module: 'Bar Bending Schedule',
+      sections
+    });
+  };
+
   const exportCSV = () => {
     const rows = items.map(item => {
       const tl = calcTotalLength(item.length, item.quantity);
@@ -275,6 +341,7 @@ Return JSON array format:
         </button>
         {items.length > 0 && (
           <>
+            <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8 }}>📄 PDF</button>
             <button onClick={exportCSV} style={btnS}>
               <Download size={14} />
               <span style={{ marginLeft: 4 }}>Export CSV</span>

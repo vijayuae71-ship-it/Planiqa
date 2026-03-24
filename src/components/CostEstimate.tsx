@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, inp, sel, tbl, th, td, badge, secTitle, empty, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
 
 interface Props {
@@ -140,7 +141,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
   const fmtC = (val: number) => `${sym} ${fmt(convert(val))}`;
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true); setError('');
@@ -205,6 +206,121 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
       Status: i.confirmed ? 'Confirmed' : 'Estimated',
     }));
     downloadCSV(rows, 'cost-estimate');
+  };
+
+  const exportPDF = () => {
+    if (!data) return;
+    const sections: PDFSection[] = [];
+
+    // Cost summary
+    sections.push({
+      type: 'keyvalue',
+      title: 'Cost Summary',
+      items: [
+        { label: 'Total Material', value: fmtC(totals.material) },
+        { label: 'Total Labor', value: fmtC(totals.labor) },
+        { label: 'Total Equipment', value: fmtC(totals.equipment) },
+        { label: 'Grand Total', value: fmtC(totals.grand) },
+        { label: 'Currency', value: currency },
+        { label: 'Cost Basis', value: costBasis },
+        { label: 'Region', value: region },
+      ],
+    });
+
+    // Cost items table
+    sections.push({
+      type: 'table',
+      title: 'Cost Breakdown',
+      headers: ['CSI Code', 'Description', 'Specification', 'Qty', 'Unit', 'Material Rate', 'Labor Rate', 'Equip. Rate', 'Rate Source', 'Total'],
+      rows: data.items.map(i => [
+        String(i.csiCode ?? ''),
+        String(i.description ?? ''),
+        String(i.specification ?? ''),
+        String(fmt(i.quantity)),
+        String(i.unit ?? ''),
+        fmtC(i.materialRate),
+        fmtC(i.laborRate),
+        fmtC(i.equipmentRate),
+        String(i.rateSource ?? ''),
+        fmtC(i.total),
+      ]),
+      summary: [
+        { label: 'Material Total', value: fmtC(totals.material) },
+        { label: 'Labor Total', value: fmtC(totals.labor) },
+        { label: 'Equipment Total', value: fmtC(totals.equipment) },
+        { label: 'Grand Total', value: fmtC(totals.grand) },
+      ],
+    });
+
+    // VE Opportunities
+    if (data.veOpportunities && data.veOpportunities.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Value Engineering Opportunities',
+        headers: ['Opportunity', 'Potential Saving', 'Risk Level'],
+        rows: data.veOpportunities.map(ve => [
+          String(ve.item ?? ''),
+          fmtC(ve.saving),
+          String(ve.risk ?? ''),
+        ]),
+        summary: [{ label: 'Total Potential Savings', value: fmtC(data.veOpportunities.reduce((s, v) => s + v.saving, 0)) }],
+      });
+    }
+
+    // Cash Flow
+    if (data.cashFlow && data.cashFlow.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Cash Flow Projection',
+        headers: ['Month', 'Planned', 'Cumulative'],
+        rows: data.cashFlow.map(cf => [
+          String(cf.month ?? ''),
+          fmtC(cf.planned),
+          fmtC(cf.cumulative),
+        ]),
+      });
+    }
+
+    // Clarifications
+    if (data.clarificationsNeeded && data.clarificationsNeeded.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Clarifications Needed',
+        headers: ['#', 'Priority', 'Impact Area', 'Question'],
+        rows: data.clarificationsNeeded.map((c, i) => [
+          String(i + 1),
+          String(c.priority ?? ''),
+          String(c.impactArea ?? ''),
+          String(c.question ?? ''),
+        ]),
+      });
+    }
+
+    // Assumptions
+    if (data.assumptions && data.assumptions.length > 0) {
+      sections.push({
+        type: 'list',
+        title: 'Assumptions',
+        items: data.assumptions,
+        ordered: true,
+      });
+    }
+
+    // Exclusions
+    if (data.exclusions && data.exclusions.length > 0) {
+      sections.push({
+        type: 'list',
+        title: 'Exclusions',
+        items: data.exclusions,
+        ordered: true,
+      });
+    }
+
+    generatePDF({
+      title: 'Cost Estimate Report',
+      module: 'Module 6: Cost Estimate',
+      sections,
+    });
   };
 
   const summaryCards = [
@@ -288,6 +404,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
           <div style={{ ...card, marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={secTitle}><BarChart3 size={16} style={{ marginRight: 6 }} />Cost Breakdown</h3>
+              <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
               <button style={btnSm} onClick={exportCSV}><Download size={14} /> Export CSV</button>
             </div>
             <div style={{ overflowX: 'auto' }}>

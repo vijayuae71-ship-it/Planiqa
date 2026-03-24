@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, inp, sel, tbl, th, td, badge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadTXT } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -55,7 +56,7 @@ export const ScopeOfWork: React.FC<Props> = ({ drawings, selectedDrawingIds, api
   const [activeTab, setActiveTab] = useState<'scope' | 'gaps' | 'clarifications'>('scope');
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);
@@ -184,6 +185,66 @@ Return JSON object format:
     downloadTXT(text, 'scope-of-work.txt');
   };
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    if (drawingSummary) {
+      sections.push({
+        type: 'text',
+        title: 'Drawing Summary',
+        content: drawingSummary
+      });
+    }
+    sections.push({
+      type: 'table',
+      title: 'Scope Items',
+      headers: ['Div', 'Division', 'Trade', 'Description', 'Specification', 'Measurement', 'Status'],
+      rows: data.map(item => [
+        String(item.division ?? ''),
+        String(item.divisionName ?? ''),
+        String(item.trade ?? ''),
+        String(item.description ?? ''),
+        String(item.specification ?? ''),
+        String(item.measurementBasis ?? ''),
+        item.confirmed ? 'Confirmed' : 'Assumed'
+      ]),
+      summary: [
+        { label: 'Total Items', value: String(data.length) },
+        { label: 'Confirmed', value: String(data.filter(d => d.confirmed).length) },
+        { label: 'Assumed', value: String(data.filter(d => !d.confirmed).length) }
+      ]
+    });
+    if (gaps.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Information Gaps',
+        headers: ['Priority', 'Description', 'Discipline', 'Action Required'],
+        rows: gaps.map(g => [
+          String(g.priority ?? ''),
+          String(g.description ?? ''),
+          String(g.discipline ?? ''),
+          String(g.actionRequired ?? '')
+        ])
+      });
+    }
+    if (clarifications.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Clarifications / RFIs',
+        headers: ['Directed To', 'Question', 'Reason'],
+        rows: clarifications.map(c => [
+          String(c.directedTo ?? ''),
+          String(c.question ?? ''),
+          String(c.reason ?? '')
+        ])
+      });
+    }
+    generatePDF({
+      title: 'Scope of Work Report',
+      module: 'Scope of Work',
+      sections
+    });
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -247,6 +308,7 @@ Return JSON object format:
               <RefreshCw size={14} />
               <span style={{ marginLeft: 4 }}>Regenerate</span>
             </button>
+            <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8 }}>📄 PDF</button>
             <button onClick={exportTXT} style={btnS}>
               <Download size={14} />
               <span style={{ marginLeft: 4 }}>Export TXT</span>

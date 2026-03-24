@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, inp, tbl, th, td, badge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadTXT } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 interface Props {
   drawings: Drawing[];
@@ -50,7 +51,7 @@ export const ExecutionDocument: React.FC<Props> = ({ drawings, selectedDrawingId
   const [commissioningChecks, setCommissioningChecks] = useState<Record<number, boolean>>({});
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);
@@ -122,6 +123,101 @@ Return JSON object format:
 
   const toggleCommissioning = (idx: number) => {
     setCommissioningChecks(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  const exportPDF = () => {
+    if (!data) return;
+    const sections: PDFSection[] = [];
+    if (data.assumptions && data.assumptions.length > 0) {
+      sections.push({
+        type: 'list',
+        title: 'Key Assumptions',
+        items: data.assumptions
+      });
+    }
+    if (data.constructionSequence.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Construction Sequence',
+        headers: ['#', 'Phase', 'Duration', 'Key Standards', 'Activities'],
+        rows: data.constructionSequence.map((s: any, i: number) => [
+          String(i + 1),
+          String(typeof s === 'string' ? s : (s.phase ?? '')),
+          String(typeof s === 'string' ? '' : (s.duration ?? '')),
+          String(typeof s === 'string' ? '' : (s.keyStandards ?? '')),
+          typeof s === 'string' ? '' : (s.activities || []).join('; ')
+        ])
+      });
+    }
+    if (data.wbs.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Work Breakdown Structure',
+        headers: ['Code', 'Task', 'Duration', 'Predecessor', 'Resources', 'Deliverable'],
+        rows: data.wbs.map(w => [
+          String(w.code ?? ''),
+          String(w.task ?? ''),
+          String(w.duration ?? ''),
+          String(w.predecessor ?? ''),
+          String(w.resources ?? ''),
+          String(w.deliverable ?? '')
+        ])
+      });
+    }
+    if (data.qcPlan.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Quality Control & Inspection Plan',
+        headers: ['Activity', 'Standard', 'Test Method', 'Frequency', 'Acceptance Criteria'],
+        rows: data.qcPlan.map((q: any) => [
+          String(typeof q === 'string' ? q : (q.activity ?? '')),
+          String(typeof q === 'string' ? '' : (q.standard ?? '')),
+          String(typeof q === 'string' ? '' : (q.testMethod ?? '')),
+          String(typeof q === 'string' ? '' : (q.frequency ?? '')),
+          String(typeof q === 'string' ? '' : (q.acceptanceCriteria ?? ''))
+        ])
+      });
+    }
+    if (data.safetyPlan.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'HSE Plan',
+        headers: ['Hazard', 'Risk Level', 'Control Measure', 'Standard', 'PPE Required'],
+        rows: data.safetyPlan.map((s: any) => [
+          String(typeof s === 'string' ? s : (s.hazard ?? '')),
+          String(typeof s === 'string' ? '' : (s.riskLevel ?? '')),
+          String(typeof s === 'string' ? '' : (s.control ?? '')),
+          String(typeof s === 'string' ? '' : (s.standard ?? '')),
+          String(typeof s === 'string' ? '' : (s.ppe ?? ''))
+        ])
+      });
+    }
+    if (data.commissioning.length > 0) {
+      sections.push({
+        type: 'list',
+        title: 'Commissioning Checklist',
+        items: data.commissioning.map((c: any) => typeof c === 'string' ? c : JSON.stringify(c)),
+        ordered: true
+      });
+    }
+    if (data.clarificationsNeeded && data.clarificationsNeeded.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Clarifications & RFIs',
+        headers: ['Priority', 'Directed To', 'Question', 'Reason'],
+        rows: data.clarificationsNeeded.map((c: any) => [
+          String(c.priority ?? ''),
+          String(c.directedTo ?? ''),
+          String(c.question ?? ''),
+          String(c.reason ?? '')
+        ])
+      });
+    }
+    generatePDF({
+      title: 'Execution Document',
+      module: 'Execution Document',
+      sections
+    });
   };
 
   const exportTXT = () => {
@@ -255,6 +351,7 @@ Return JSON object format:
               <RefreshCw size={14} />
               <span style={{ marginLeft: 4 }}>Regenerate</span>
             </button>
+            <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8 }}>📄 PDF</button>
             <button onClick={exportTXT} style={btnS}>
               <Download size={14} />
               <span style={{ marginLeft: 4 }}>Export TXT</span>

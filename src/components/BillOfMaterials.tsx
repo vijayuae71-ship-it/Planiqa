@@ -4,6 +4,7 @@ import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, inp, sel, tbl, th, td, badge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
+import { generatePDF, PDFSection } from '../utils/pdf';
 import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
 
 interface Props {
@@ -44,7 +45,7 @@ export const BillOfMaterials: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const fmtC = (val: number) => `${sym} ${fmt(conv(val))}`;
 
   const generate = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);
@@ -138,6 +139,50 @@ ALL rates MUST be in INR.`;
 
   const grandTotal = useMemo(() => data.reduce((sum, item) => sum + item.total, 0), [data]);
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    sections.push({
+      type: 'table',
+      title: 'Bill of Materials',
+      headers: ['Trade', 'Item', 'Description', 'Qty', 'Unit', 'Rate', 'Rate Source', 'Total', 'Status'],
+      rows: data.map(item => [
+        String(item.trade ?? ''),
+        String(item.item ?? ''),
+        String(item.description ?? ''),
+        String(fmt(item.quantity)),
+        String(item.unit ?? ''),
+        fmtC(item.unitRate),
+        String(item.rateSource ?? ''),
+        fmtC(item.total),
+        item.confirmed ? 'Confirmed' : 'Estimated'
+      ]),
+      summary: [
+        { label: 'Line Items', value: String(data.length) },
+        { label: 'Trades', value: String(trades.length) },
+        { label: 'Grand Total', value: fmtC(grandTotal) }
+      ]
+    });
+    sections.push({
+      type: 'table',
+      title: 'Cost Summary by Trade',
+      headers: ['Trade', 'Items', 'Subtotal', '% of Total'],
+      rows: tradeSubtotals.map(([trade, subtotal]) => [
+        String(trade),
+        String(data.filter(d => d.trade === trade).length),
+        fmtC(subtotal),
+        grandTotal > 0 ? `${((subtotal / grandTotal) * 100).toFixed(1)}%` : '0%'
+      ]),
+      summary: [
+        { label: 'Grand Total', value: fmtC(grandTotal) }
+      ]
+    });
+    generatePDF({
+      title: 'Bill of Materials Report',
+      module: 'Bill of Materials',
+      sections
+    });
+  };
+
   const exportCSV = () => {
     const rows = data.map(item => ({
       Trade: item.trade,
@@ -218,6 +263,7 @@ ALL rates MUST be in INR.`;
               <RefreshCw size={14} />
               <span style={{ marginLeft: 4 }}>Regenerate</span>
             </button>
+            <button onClick={exportPDF} style={{ ...btnS, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8 }}>📄 PDF</button>
             <button onClick={exportCSV} style={btnS}>
               <Download size={14} />
               <span style={{ marginLeft: 4 }}>Export CSV</span>

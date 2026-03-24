@@ -3,6 +3,7 @@ import { Upload, FileImage, Trash2, CheckSquare, Square, Search, Eye, Archive, R
 import { Drawing } from '../types';
 import { C, card, btnP, btnS, btnSm, btnD, inp, tbl, th, td, badge, secTitle, empty, uid, fmt } from '../utils/theme';
 import { compressImage, createThumbnail, callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
+import { generatePDF, PDFSection } from '../utils/pdf';
 
 function getExtLabel(name: string): string {
   const ext = name.toLowerCase().split('.').pop() || '';
@@ -122,7 +123,7 @@ export const UploadAnalyze: React.FC<Props> = ({ drawings, onDrawingsChange, sel
   };
 
   const analyzeSelected = async () => {
-    // API key handled by serverless function
+    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the checkboxes first'); return; }
     setAnalyzing(true);
@@ -240,6 +241,39 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(d => selectedDrawingIds.includes(d.id));
 
+  const exportPDF = () => {
+    const sections: PDFSection[] = [];
+    const active = drawings.filter(d => !d.archived);
+    sections.push({
+      type: 'table',
+      title: 'Uploaded Drawings',
+      headers: ['Name', 'Version', 'Size', 'Uploaded', 'Status'],
+      rows: active.map(d => [
+        String(d.name ?? ''),
+        `v${String(d.version ?? 1)}`,
+        formatSize(d.size || 0),
+        String(d.uploadedAt ?? ''),
+        d.analysis ? 'Analyzed' : 'Pending'
+      ]),
+      summary: [
+        { label: 'Total Active', value: String(active.length) },
+        { label: 'Analyzed', value: String(active.filter(d => d.analysis).length) }
+      ]
+    });
+    active.filter(d => d.analysis).forEach(d => {
+      sections.push({
+        type: 'text',
+        title: `Analysis — ${d.name}`,
+        content: String(d.analysis ?? '')
+      });
+    });
+    generatePDF({
+      title: 'Drawing Upload & Analysis Report',
+      module: 'Upload & Analyze',
+      sections
+    });
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -323,6 +357,7 @@ Return JSON: {"analyses":[{"drawingIndex":0,"summary":"full structured analysis 
             <Archive size={14} />
             <span style={{ marginLeft: 4 }}>{showArchived ? 'Show Active' : 'Show Archived'}</span>
           </button>
+          <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8 }}>📄 PDF</button>
         </div>
       )}
 
