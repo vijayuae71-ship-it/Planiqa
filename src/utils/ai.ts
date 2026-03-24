@@ -1,0 +1,381 @@
+import { Drawing } from '../types';
+
+// Robust JSON extraction from Claude responses (handles text before/after JSON)
+export function extractJSON(text: string): any {
+  // First try: strip markdown code fences and parse
+  const stripped = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  try { return JSON.parse(stripped); } catch {}
+
+  // Second try: find JSON array [...] in the text
+  const arrStart = text.indexOf('[');
+  const arrEnd = text.lastIndexOf(']');
+  if (arrStart !== -1 && arrEnd > arrStart) {
+    try { return JSON.parse(text.slice(arrStart, arrEnd + 1)); } catch {}
+  }
+
+  // Third try: find JSON object {...} in the text
+  const objStart = text.indexOf('{');
+  const objEnd = text.lastIndexOf('}');
+  if (objStart !== -1 && objEnd > objStart) {
+    try { return JSON.parse(text.slice(objStart, objEnd + 1)); } catch {}
+  }
+
+  // Fourth try: if AI returned plain text, wrap it
+  if (text.length > 20) {
+    return { _aiNote: text.trim() };
+  }
+
+  throw new Error('Could not extract JSON from AI response');
+}
+
+// Embedded API key — used as fallback if serverless function doesn't have env var
+const EMBEDDED_API_KEY = ''  // Set via environment or Netlify function handles auth;
+
+export function getEmbeddedApiKey(): string {
+  return EMBEDDED_API_KEY;
+}
+
+// Usage tracking types
+export interface UsageRecord {
+  id: string;
+  timestamp: string;
+  companyId: string;
+  companyName: string;
+  userId: string;
+  userName: string;
+  projectId: string;
+  projectName: string;
+  module: string;
+  inputTokens: number;
+  outputTokens: number;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  drawingCount: number;
+  model: string;
+}
+
+// Pricing per 1M tokens (Claude Sonnet)
+const INPUT_COST_PER_M = 3.0;
+const OUTPUT_COST_PER_M = 15.0;
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function calcCost(inputTokens: number, outputTokens: number) {
+  const inputCost = (inputTokens / 1_000_000) * INPUT_COST_PER_M;
+  const outputCost = (outputTokens / 1_000_000) * OUTPUT_COST_PER_M;
+  return { inputCost, outputCost, totalCost: inputCost + outputCost };
+}
+
+// localStorage-based usage tracking for Netlify
+const USAGE_KEY = 'planiq_usage_records';
+
+function loadUsageFromStorage(): UsageRecord[] {
+  try {
+    const data = localStorage.getItem(USAGE_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch { return []; }
+}
+
+function saveUsageToStorage(records: UsageRecord[]) {
+  try { localStorage.setItem(USAGE_KEY, JSON.stringify(records)); } catch {}
+}
+
+export async function getUsageRecordsAsync(): Promise<UsageRecord[]> {
+  return loadUsageFromStorage();
+}
+
+export function getUsageRecords(): UsageRecord[] {
+  return loadUsageFromStorage();
+}
+
+export async function saveUsageRecord(record: UsageRecord) {
+  const records = loadUsageFromStorage();
+  records.unshift(record);
+  saveUsageToStorage(records);
+}
+
+export function getUsageByCompany(companyId?: string): UsageRecord[] {
+  const all = getUsageRecords();
+  return companyId ? all.filter(r => r.companyId === companyId) : all;
+}
+
+export async function getUsageByCompanyAsync(companyId?: string): Promise<UsageRecord[]> {
+  const all = await getUsageRecordsAsync();
+  return companyId ? all.filter(r => r.companyId === companyId) : all;
+}
+
+export function getUsageSummary(records: UsageRecord[]) {
+  const totalCost = records.reduce((s, r) => s + r.totalCost, 0);
+  const totalCalls = records.length;
+  const totalInputTokens = records.reduce((s, r) => s + r.inputTokens, 0);
+  const totalOutputTokens = records.reduce((s, r) => s + r.outputTokens, 0);
+  const byCompany: Record<string, { name: string; calls: number; cost: number }> = {};
+  for (const r of records) {
+    if (!byCompany[r.companyId]) byCompany[r.companyId] = { name: r.companyName, calls: 0, cost: 0 };
+    byCompany[r.companyId].calls++;
+    byCompany[r.companyId].cost += r.totalCost;
+  }
+  const byModule: Record<string, { calls: number; cost: number }> = {};
+  for (const r of records) {
+    if (!byModule[r.module]) byModule[r.module] = { calls: 0, cost: 0 };
+    byModule[r.module].calls++;
+    byModule[r.module].cost += r.totalCost;
+  }
+  return { totalCost, totalCalls, totalInputTokens, totalOutputTokens, byCompany, byModule };
+}
+
+// Detect file category from name/type
+function getFileCategory(file: File): { category: 'image' | 'pdf' | 'cad' | 'bim' | 'doc' | 'other'; label: string; color: string } {
+  const ext = file.name.toLowerCase().split('.').pop() || '';
+  const imageExts = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'svg'];
+  const cadExts = ['dwg', 'dxf', 'dgn', 'dwf', 'dwfx'];
+  const bimExts = ['rvt', 'rfa', 'ifc', 'nwd', 'nwc', 'nwf', 'skp', '3dm'];
+  const docExts = ['doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'rtf', 'ppt', 'pptx'];
+  if (file.type === 'application/pdf' || ext === 'pdf') return { category: 'pdf', label: 'PDF', color: '#dc2626' };
+  if (imageExts.includes(ext) || file.type.startsWith('image/')) return { category: 'image', label: ext.toUpperCase(), color: '#2563eb' };
+  if (cadExts.includes(ext)) return { category: 'cad', label: ext.toUpperCase(), color: '#f59e0b' };
+  if (bimExts.includes(ext)) return { category: 'bim', label: ext.toUpperCase(), color: '#10b981' };
+  if (docExts.includes(ext)) return { category: 'doc', label: ext.toUpperCase(), color: '#6366f1' };
+  return { category: 'other', label: ext.toUpperCase() || 'FILE', color: '#6b7280' };
+}
+
+export { getFileCategory };
+
+export async function compressImage(file: File, maxW = 1500, quality = 0.7): Promise<{ base64: string; mediaType: string }> {
+  const { category } = getFileCategory(file);
+
+  // Images: compress via canvas
+  if (category === 'image' && !file.name.toLowerCase().endsWith('.svg')) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = (h * maxW) / w; w = maxW; }
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
+        };
+        img.onerror = () => reject(new Error('Failed to load image.'));
+        img.src = reader.result as string;
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // All other formats: read as raw base64
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const mediaType = file.type || 'application/octet-stream';
+      resolve({ base64: dataUrl.split(',')[1], mediaType });
+    };
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function createThumbnail(base64: string, mediaType: string, fileName?: string): Promise<string> {
+  const isImage = mediaType.startsWith('image/') && mediaType !== 'image/svg+xml';
+
+  if (isImage) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const s = 120;
+        const ratio = Math.min(s / img.width, s / img.height);
+        canvas.width = img.width * ratio;
+        canvas.height = img.height * ratio;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = () => resolve(generatePlaceholderThumb('IMG', '#2563eb'));
+      img.src = `data:${mediaType};base64,${base64}`;
+    });
+  }
+
+  const ext = (fileName || '').toLowerCase().split('.').pop() || '';
+  const formats: Record<string, { label: string; color: string; sub: string }> = {
+    'pdf': { label: 'PDF', color: '#dc2626', sub: 'Document' },
+    'dwg': { label: 'DWG', color: '#f59e0b', sub: 'AutoCAD' },
+    'dxf': { label: 'DXF', color: '#f59e0b', sub: 'AutoCAD' },
+    'dgn': { label: 'DGN', color: '#f59e0b', sub: 'MicroStation' },
+    'dwf': { label: 'DWF', color: '#f59e0b', sub: 'Design Web' },
+    'rvt': { label: 'RVT', color: '#10b981', sub: 'Revit' },
+    'rfa': { label: 'RFA', color: '#10b981', sub: 'Revit Family' },
+    'ifc': { label: 'IFC', color: '#10b981', sub: 'BIM Model' },
+    'nwd': { label: 'NWD', color: '#10b981', sub: 'Navisworks' },
+    'nwc': { label: 'NWC', color: '#10b981', sub: 'Navisworks' },
+    'skp': { label: 'SKP', color: '#10b981', sub: 'SketchUp' },
+    '3dm': { label: '3DM', color: '#10b981', sub: 'Rhino' },
+    'xlsx': { label: 'XLSX', color: '#6366f1', sub: 'Spreadsheet' },
+    'xls': { label: 'XLS', color: '#6366f1', sub: 'Spreadsheet' },
+    'csv': { label: 'CSV', color: '#6366f1', sub: 'Data' },
+    'docx': { label: 'DOCX', color: '#6366f1', sub: 'Document' },
+    'doc': { label: 'DOC', color: '#6366f1', sub: 'Document' },
+    'svg': { label: 'SVG', color: '#2563eb', sub: 'Vector' },
+  };
+  const fmt = formats[ext] || { label: ext.toUpperCase() || 'FILE', color: '#6b7280', sub: 'Drawing' };
+  return generatePlaceholderThumb(fmt.label, fmt.color, fmt.sub);
+}
+
+function generatePlaceholderThumb(label: string, color: string, sub?: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 120; canvas.height = 120;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = color + '15';
+  ctx.fillRect(0, 0, 120, 120);
+  ctx.strokeStyle = color + '40';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, 118, 118);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(35, 15, 50, 60, 4);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(70, 15);
+  ctx.lineTo(85, 30);
+  ctx.lineTo(70, 30);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, 60, 58);
+  if (sub) {
+    ctx.fillStyle = color;
+    ctx.font = '11px sans-serif';
+    ctx.fillText(sub, 60, 100);
+  }
+  return canvas.toDataURL('image/png');
+}
+
+// Context for usage tracking
+let _usageContext: {
+  companyId: string; companyName: string;
+  userId: string; userName: string;
+  projectId: string; projectName: string;
+  module: string;
+} | null = null;
+
+export function setUsageContext(ctx: typeof _usageContext) {
+  _usageContext = ctx;
+}
+
+export async function callClaude(
+  apiKey: string,
+  systemPrompt: string,
+  userMessage: string,
+  drawings: Drawing[] = []
+): Promise<string> {
+  const activeDrawings = drawings.filter(d => d.base64 && !d.archived);
+  const drawingCount = activeDrawings.length;
+
+  // Build message content array with images + text
+  const content: any[] = [];
+
+  for (const d of activeDrawings) {
+    // Determine the correct media type for the API
+    let mediaType = d.mediaType || 'image/jpeg';
+    // Claude API only supports these image types
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    
+    if (mediaType === 'application/pdf') {
+      // For PDFs, use document type
+      content.push({
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: d.base64,
+        },
+      });
+    } else if (supportedTypes.includes(mediaType)) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data: d.base64,
+        },
+      });
+    } else {
+      // Convert unsupported image types to JPEG description
+      content.push({
+        type: 'text',
+        text: `[Drawing: ${d.name} — Format: ${mediaType} — Note: This format was sent as reference; analyze based on available visual content]`,
+      });
+    }
+  }
+
+  content.push({ type: 'text', text: userMessage });
+
+  // Call the Netlify serverless function (API key is server-side)
+  const response = await fetch('/.netlify/functions/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system: systemPrompt,
+      messages: [{ role: 'user', content }],
+      max_tokens: 8192,
+    }),
+  });
+
+  if (!response.ok) {
+    let errMsg = `API returned status ${response.status}`;
+    try {
+      const errData = await response.json();
+      errMsg = errData?.error?.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const resp = await response.json();
+
+  if (resp.error) throw new Error(resp.error.message || 'API error');
+  if (!resp.content?.[0]?.text) throw new Error('Empty API response — the AI returned no content. Please try again.');
+
+  const responseText = resp.content[0].text;
+
+  // Track usage
+  const inputTokens = resp.usage?.input_tokens || estimateTokens(systemPrompt + userMessage);
+  const outputTokens = resp.usage?.output_tokens || estimateTokens(responseText);
+  const costs = calcCost(inputTokens, outputTokens);
+
+  if (_usageContext) {
+    await saveUsageRecord({
+      id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      timestamp: new Date().toISOString(),
+      companyId: _usageContext.companyId,
+      companyName: _usageContext.companyName,
+      userId: _usageContext.userId,
+      userName: _usageContext.userName,
+      projectId: _usageContext.projectId,
+      projectName: _usageContext.projectName,
+      module: _usageContext.module,
+      inputTokens,
+      outputTokens,
+      ...costs,
+      drawingCount,
+      model: 'claude-sonnet-4-20250514',
+    });
+  }
+
+  return responseText;
+}
+
+export function getSelectedDrawings(drawings: Drawing[], selectedIds: string[]): Drawing[] {
+  return drawings.filter(d => selectedIds.includes(d.id) && !d.archived);
+}
