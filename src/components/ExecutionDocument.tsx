@@ -51,7 +51,6 @@ export const ExecutionDocument: React.FC<Props> = ({ drawings, selectedDrawingId
   const [commissioningChecks, setCommissioningChecks] = useState<Record<number, boolean>>({});
 
   const generate = async () => {
-    if (!apiKey) { setError('Configure API key in Settings first'); return; }
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true);

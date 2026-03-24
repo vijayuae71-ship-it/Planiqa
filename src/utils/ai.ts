@@ -1,6 +1,6 @@
 import { Drawing } from '../types';
 
-// Robust JSON extraction from Claude responses (handles text before/after JSON)
+// Robust JSON extraction from Claude responses (handles text before/after JSON, truncated responses)
 export function extractJSON(text: string): any {
   // First try: strip markdown code fences and parse
   const stripped = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -20,9 +20,39 @@ export function extractJSON(text: string): any {
     try { return JSON.parse(text.slice(objStart, objEnd + 1)); } catch {}
   }
 
-  // Fourth try: if AI returned plain text, wrap it
+  // Fourth try: REPAIR truncated JSON arrays
+  // This happens when max_tokens cuts off the response mid-JSON
+  if (arrStart !== -1) {
+    let candidate = text.slice(arrStart);
+    // Remove trailing incomplete text after last complete object
+    const lastBrace = candidate.lastIndexOf('}');
+    if (lastBrace > 0) {
+      // Try closing the array after the last complete object
+      const repaired = candidate.slice(0, lastBrace + 1) + ']';
+      try { return JSON.parse(repaired); } catch {}
+      // If that failed, try removing the last (possibly incomplete) object
+      const secondLastBrace = candidate.lastIndexOf('},');
+      if (secondLastBrace > 0) {
+        const repaired2 = candidate.slice(0, secondLastBrace + 1) + ']';
+        try { return JSON.parse(repaired2); } catch {}
+      }
+    }
+  }
+
+  // Fifth try: repair truncated JSON objects
+  if (objStart !== -1) {
+    let candidate = text.slice(objStart);
+    const lastBrace = candidate.lastIndexOf('}');
+    if (lastBrace > 0) {
+      try { return JSON.parse(candidate.slice(0, lastBrace + 1)); } catch {}
+    }
+  }
+
+  // Final fallback: AI returned plain text or completely unparseable response
   if (text.length > 20) {
-    return { _aiNote: text.trim() };
+    // Don't dump the whole raw response — give a useful error message
+    const preview = text.slice(0, 200).replace(/\n/g, ' ');
+    return { _aiNote: `AI response could not be parsed. The output may have been truncated. Please try again.\n\nPreview: "${preview}..."` };
   }
 
   throw new Error('Could not extract JSON from AI response');
@@ -329,7 +359,7 @@ export async function callClaude(
     body: JSON.stringify({
       system: systemPrompt,
       messages: [{ role: 'user', content }],
-      max_tokens: 8192,
+      max_tokens: 16384,
     }),
   });
 
