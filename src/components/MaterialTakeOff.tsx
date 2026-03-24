@@ -29,10 +29,43 @@ interface MTOItem {
   confirmed: boolean;
 }
 
+interface MTOData {
+  drawingAnalysis?: {
+    drawingType: string;
+    buildingType: string;
+    visibleElements: string[];
+    readableDimensions: string[];
+    specsOnDrawing: string[];
+    scale: string;
+  };
+  items: MTOItem[];
+  gaps?: { priority: string; description: string }[];
+  consultantQuestions?: { to: string; question: string; priority: string; impactArea: string }[];
+}
+
 function buildMTOPrompt(): string {
   const rateTable = getCPWDRateReference('INR');
   const meRates = getMiddleEastRates();
   return `You are a senior quantity surveyor (RICS/AACE certified, 20+ years experience) performing a material take-off for Tier-1 contractors (L&T, Sobha, Danube, Nagarjuna). This MTO will be used for procurement planning and vendor quotation.
+
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type, but NOT explicitly shown. State your assumption: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — MATERIAL TAKE-OFF DATA:
+Generate MTO data based on what is VISIBLE in the drawings. Extrapolate only where standard practice allows.
 
 ═══ MANDATORY RATE TABLE — YOU MUST USE THESE EXACT RATES ═══
 ${rateTable}
@@ -68,8 +101,24 @@ CATEGORIES: Excavation & Earthwork, Concrete, Reinforcement Steel, Formwork, Mas
 
 GENERATE 40-80+ LINE ITEMS. Include specification (IS code), quantity with calculation basis, proper unit per IS 1200.
 
-Return JSON array format:
-[{"category":"Concrete","item":"PCC M15 Foundation Bed","description":"PCC M15 (1:2:4) for foundation bed","specification":"IS 456:2000, Min cement 270 kg/m³","quantity":45.5,"unit":"m³","wasteFactor":3,"unitRate":5862,"rateSource":"CPWD DSR 2024 [DSR 4.2] — ₹5,862/m³","measurementBasis":"IS 1200 Part 2. Strip footing: 45m × 0.6m × 0.15 = 4.05 m³","confirmed":true}]`;
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"What is the specified floor finish for the auditorium seating area? Drawing shows only outline without finish schedule.", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
+Return JSON object format:
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["walls","columns","beams"],"readableDimensions":["Overall: 45m × 30m"],"specsOnDrawing":["M25 concrete noted"],"scale":"1:100"},"items":[{"category":"Concrete","item":"PCC M15 Foundation Bed","description":"PCC M15 (1:2:4) for foundation bed","specification":"IS 456:2000, Min cement 270 kg/m³","quantity":45.5,"unit":"m³","wasteFactor":3,"unitRate":5862,"rateSource":"CPWD DSR 2024 [DSR 4.2] — ₹5,862/m³","measurementBasis":"IS 1200 Part 2. Strip footing: 45m × 0.6m × 0.15 = 4.05 m³","confirmed":true}],"gaps":[{"priority":"HIGH","description":"Foundation design not shown — need structural engineer's foundation layout drawing"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}
+
+ALL rates MUST be in INR.`;
 }
 
 let idCounter = 0;
@@ -81,7 +130,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', AED: 'د.إ', INR: 
 export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKey, onStatusChange }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [items, setItems] = useState<MTOItem[]>([]);
+  const [data, setData] = useState<MTOData | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [editingWaste, setEditingWaste] = useState<string | null>(null);
   const [editWasteVal, setEditWasteVal] = useState('');
@@ -89,15 +138,26 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
 
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;
-  const conv = (val: number) => val * rate;
+  const conv = (val: number) => val / (EXCHANGE_RATES['INR'] || 83.5) * (EXCHANGE_RATES[currency] || 1);
   const fmtC = (val: number) => `${sym} ${fmt(conv(val))}`;
+
+  const items = data?.items || [];
+
+  const updateItems = (updater: (prev: MTOItem[]) => MTOItem[]) => {
+    setData(prev => prev ? { ...prev, items: updater(prev.items) } : null);
+  };
+
+  const badgeStyle = (bg: string, color: string, extra?: React.CSSProperties): React.CSSProperties => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+    background: bg, color, ...extra
+  });
 
   const generate = async () => {
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true); setError('');
     try {
-      const userMsg = 'Analyze these construction drawings and create a comprehensive material take-off. CRITICAL: Use the EXACT rates from the CPWD DSR rate table in your instructions — Excavation MUST be ₹398/m³ [DSR 2.1], PCC M15 MUST be ₹5,862/m³ [DSR 4.2], RCC M30 MUST be ₹7,894/m³ [DSR 4.9], Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy numbers exactly from the table. Do NOT modify, round, or fabricate rates.';
+      const userMsg = 'Analyze these construction drawings and create a comprehensive material take-off. CRITICAL: Use the EXACT rates from the CPWD DSR rate table in your instructions — Excavation MUST be ₹398/m³ [DSR 2.1], PCC M15 MUST be ₹5,862/m³ [DSR 4.2], RCC M30 MUST be ₹7,894/m³ [DSR 4.9], Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy numbers exactly from the table. Do NOT modify, round, or fabricate rates. Return a JSON OBJECT (not array) with drawingAnalysis, items, gaps, and consultantQuestions fields.';
       const result = await callClaude(apiKey, buildMTOPrompt(), userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
@@ -116,7 +176,12 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
         measurementBasis: r.measurementBasis || '',
         confirmed: r.confirmed !== false,
       }));
-      setItems(mapped);
+      setData({
+        drawingAnalysis: parsed.drawingAnalysis || undefined,
+        items: mapped,
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || [],
+      });
       onStatusChange('complete');
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -154,7 +219,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const saveWaste = (id: string) => {
     const val = parseFloat(editWasteVal);
     if (!isNaN(val) && val >= 0 && val <= 100) {
-      setItems(prev => prev.map(i => i.id === id ? { ...i, wasteFactor: val } : i));
+      updateItems(prev => prev.map(i => i.id === id ? { ...i, wasteFactor: val } : i));
     }
     setEditingWaste(null);
   };
@@ -182,6 +247,21 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
     if (items.length === 0) return;
     const sections: PDFSection[] = [];
 
+    // Drawing analysis
+    if (data?.drawingAnalysis) {
+      sections.push({
+        type: 'keyvalue',
+        title: 'Drawing Analysis',
+        items: [
+          { label: 'Drawing Type', value: data.drawingAnalysis.drawingType || '' },
+          { label: 'Building Type', value: data.drawingAnalysis.buildingType || '' },
+          { label: 'Scale', value: data.drawingAnalysis.scale || 'Not indicated' },
+          ...(data.drawingAnalysis.visibleElements?.length ? [{ label: 'Visible Elements', value: data.drawingAnalysis.visibleElements.join(', ') }] : []),
+          ...(data.drawingAnalysis.readableDimensions?.length ? [{ label: 'Readable Dimensions', value: data.drawingAnalysis.readableDimensions.join('; ') }] : []),
+        ],
+      });
+    }
+
     // Category summary
     if (categorySubtotals.length > 0) {
       sections.push({
@@ -204,7 +284,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
     sections.push({
       type: 'table',
       title: `Material Take-Off Details${categoryFilter !== 'All' ? ` — ${categoryFilter}` : ''}`,
-      headers: ['Category', 'Item', 'Description', 'Specification', 'Qty', 'Unit', 'Waste %', 'Adj. Qty', 'Unit Rate', 'Rate Source', 'Total'],
+      headers: ['Category', 'Item', 'Description', 'Specification', 'Qty', 'Unit', 'Waste %', 'Adj. Qty', 'Unit Rate', 'Rate Source', 'Total', 'Status'],
       rows: exportItems.map(i => [
         String(i.category ?? ''),
         String(i.item ?? ''),
@@ -217,6 +297,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
         fmtC(i.unitRate),
         String(i.rateSource ?? ''),
         fmtC(lineTotal(i)),
+        i.confirmed ? 'Confirmed' : 'Estimated',
       ]),
       summary: [
         { label: categoryFilter !== 'All' ? `${categoryFilter} Subtotal` : 'Grand Total', value: fmtC(grandTotal) },
@@ -224,6 +305,16 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
         { label: 'Estimated', value: String(exportItems.filter(i => !i.confirmed).length) },
       ],
     });
+
+    // Gaps
+    if (data?.gaps && data.gaps.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Gaps & Missing Information',
+        headers: ['Priority', 'Description'],
+        rows: data.gaps.map(g => [String(g.priority ?? ''), String(g.description ?? '')]),
+      });
+    }
 
     generatePDF({
       title: 'Material Take-Off Report',
@@ -287,6 +378,77 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
 
       {items.length > 0 && !loading && (
         <>
+          {/* Drawing Analysis Card */}
+          {data?.drawingAnalysis && (
+            <div style={{...card, border:'2px solid #2563eb', background:'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#2563eb'}}>📐 Drawing Analysis</h3>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+                <p style={{margin:0}}><strong>Drawing Type:</strong> {data.drawingAnalysis.drawingType}</p>
+                <p style={{margin:0}}><strong>Building Type:</strong> {data.drawingAnalysis.buildingType}</p>
+              </div>
+              {data.drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Visible Elements:</strong>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'4px'}}>
+                    {data.drawingAnalysis.visibleElements.map((e:string,i:number) => (
+                      <span key={i} style={badgeStyle('#dbeafe','#1e40af')}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Readable Dimensions:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.readableDimensions.map((d:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Specifications on Drawing:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.specsOnDrawing.map((s:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.scale && <p style={{marginTop:'4px',marginBottom:0}}><strong>Scale:</strong> {data.drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
+          {/* Gaps Section */}
+          {data?.gaps && data.gaps.length > 0 && (
+            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#d97706'}}>⚠️ Gaps & Missing Information ({data.gaps.length})</h3>
+              {data.gaps.map((g:any,i:number) => (
+                <div key={i} style={{padding:'8px 0',borderBottom:i<(data.gaps?.length||0)-1?'1px solid #fde68a':'none',display:'flex',gap:'8px',alignItems:'flex-start'}}>
+                  <span style={badgeStyle(g.priority==='HIGH'?'#ef4444':g.priority==='MEDIUM'?'#f59e0b':'#3b82f6','#fff',{flexShrink:0,minWidth:'55px',textAlign:'center'})}>{g.priority}</span>
+                  <span style={{fontSize:'13px'}}>{g.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Consultant Questions Section */}
+          {data?.consultantQuestions && data.consultantQuestions.length > 0 && (
+            <div style={{...card, border:'2px solid #7c3aed', background:'#f5f3ff', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#7c3aed'}}>💬 Stakeholder Questions ({data.consultantQuestions.length})</h3>
+              {['Architect','Structural Engineer','MEP Consultant','QS/Cost Consultant'].map(role => {
+                const qs = (data.consultantQuestions || []).filter((q:any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{marginBottom:'12px'}}>
+                    <h4 style={{fontWeight:600,color:'#4c1d95',margin:'8px 0 4px',fontSize:'14px'}}>{role}</h4>
+                    {qs.map((q:any,i:number) => (
+                      <div key={i} style={{padding:'6px 8px',borderBottom:'1px solid #e9e5f5',display:'flex',gap:'6px',alignItems:'flex-start'}}>
+                        <span style={badgeStyle(q.priority==='HIGH'?'#ef4444':'#f59e0b','#fff',{flexShrink:0})}>{q.priority}</span>
+                        <div><span style={{fontSize:'13px'}}>{q.question}</span>
+                          {q.impactArea && <span style={{fontSize:'11px',color:'#6b7280',marginLeft:'8px'}}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+
           {/* Category Summary */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginBottom: 24 }}>
             {categorySubtotals.slice(0, 5).map(([cat, total], i) => {
@@ -332,7 +494,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => (
-                    <tr key={item.id} style={{ background: item.confirmed ? 'transparent' : '#fffbeb' }}>
+                    <tr key={item.id} style={{ background: item.confirmed === false ? '#fef9c3' : 'transparent' }}>
                       <td style={{ ...td, fontSize: 12 }}>
                         <span style={{ background: C.infoBg, color: C.info, padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500 }}>{item.category}</span>
                       </td>
