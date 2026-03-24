@@ -42,12 +42,15 @@ interface CashFlowItem {
 }
 
 interface CostData {
+  drawingAnalysis?: any;
   items: CostItem[];
   veOpportunities: VEOpportunity[];
   cashFlow: CashFlowItem[];
   clarificationsNeeded: { question: string; impactArea: string; priority: string }[];
   assumptions: string[];
   exclusions: string[];
+  gaps?: any[];
+  consultantQuestions?: any[];
 }
 
 const EXCHANGE_RATES: Record<string, number> = {
@@ -77,7 +80,24 @@ const REGIONS = ['UAE', 'Saudi Arabia', 'India', 'UK', 'USA', 'Qatar', 'Oman'];
 function buildCostEstimatePrompt(): string {
   const rateTable = getCPWDRateReference('INR');
   const meRates = getMiddleEastRates();
-  return `You are a senior cost estimator (AACE CCP / RICS QS, 25+ years experience) preparing detailed cost estimates for Tier-1 contractors (L&T, Sobha, Danube, Nagarjuna). Your estimate will be used for tendering and contract negotiations.
+  return `MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type, but NOT explicitly shown. State your assumption: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — COST ESTIMATION DATA:
+You are a senior cost estimator (AACE CCP / RICS QS, 25+ years experience) preparing detailed cost estimates for Tier-1 contractors (L&T, Sobha, Danube, Nagarjuna). Your estimate will be used for tendering and contract negotiations.
 
 ═══ MANDATORY RATE TABLE — YOU MUST USE THESE EXACT RATES ═══
 ${rateTable}
@@ -121,9 +141,22 @@ CASH FLOW: Monthly planned expenditure with S-curve.
 CLARIFICATIONS: Items needing consultant input.
 ASSUMPTIONS & EXCLUSIONS: List all clearly.
 
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"What is the specified floor finish for the auditorium seating area? Drawing shows only outline without finish schedule.", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
 Return JSON:
-{"items":[{"csiCode":"03 30 00","description":"RCC M30 concrete for columns","specification":"IS 456:2000, M30 grade","quantity":28,"unit":"m³","materialRate":4342,"laborRate":2763,"equipmentRate":789,"total":221032,"rateSource":"CPWD DSR 2024 [DSR 4.9] — ₹7,894/m³ total","measurementBasis":"IS 1200 Part 2. Columns C1-C8: 8nos × 0.4×0.4×4.2","confirmed":true}],"veOpportunities":[{"item":"Use GGBS blended cement in foundations","saving":85000,"risk":"Low"}],"cashFlow":[{"month":"Month 1","planned":500000,"cumulative":500000}],"clarificationsNeeded":[{"question":"MEP design drawings required","impactArea":"Divisions 21-28","priority":"Critical"}],"assumptions":["Soil bearing capacity adequate for isolated footings"],
-"exclusions":["Interior fit-out","External utilities beyond site boundary"]}`;
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Office Building","visibleElements":["columns","beams","walls","doors","windows"],"readableDimensions":["Overall: 45m × 30m","Column grid: 6m c/c"],"specsOnDrawing":["M25 concrete","Fe500 steel"],"scale":"1:100"},"items":[{"csiCode":"03 30 00","description":"RCC M30 concrete for columns","specification":"IS 456:2000, M30 grade","quantity":28,"unit":"m³","materialRate":4342,"laborRate":2763,"equipmentRate":789,"total":221032,"rateSource":"CPWD DSR 2024 [DSR 4.9] — ₹7,894/m³ total","measurementBasis":"IS 1200 Part 2. Columns C1-C8: 8nos × 0.4×0.4×4.2","confirmed":true}],"veOpportunities":[{"item":"Use GGBS blended cement in foundations","saving":85000,"risk":"Low"}],"cashFlow":[{"month":"Month 1","planned":500000,"cumulative":500000}],"clarificationsNeeded":[{"question":"MEP design drawings required","impactArea":"Divisions 21-28","priority":"Critical"}],"assumptions":["Soil bearing capacity adequate for isolated footings"],"exclusions":["Interior fit-out","External utilities beyond site boundary"],"gaps":[{"priority":"HIGH","description":"Foundation design not shown — need structural engineer's foundation layout drawing"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}`;
 }
 
 export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKey, onStatusChange }) => {
@@ -137,7 +170,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;
 
-  const convert = (val: number) => val * rate;
+  const convert = (val: number) => val / (EXCHANGE_RATES['INR'] || 83.5) * (EXCHANGE_RATES[currency] || 1);
   const fmtC = (val: number) => `${sym} ${fmt(convert(val))}`;
 
   const generate = async () => {
@@ -145,7 +178,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
     if (selected.length === 0) { setError('Select drawings from the header first'); return; }
     setLoading(true); setError('');
     try {
-      const userMsg = `Analyze these construction drawings and generate a detailed cost estimate using ${costBasis} cost basis for the ${region} region. ALL rates must be in INR from the CPWD DSR rate table provided. CRITICAL: Use the EXACT rates from the table — Excavation MUST be ₹398/m³ [DSR 2.1], PCC M15 MUST be ₹5,862/m³ [DSR 4.2], RCC M30 MUST be ₹7,894/m³ [DSR 4.9], Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy numbers exactly from the table. Do NOT modify, round, or fabricate rates.`;
+      const userMsg = `Analyze these construction drawings and generate a detailed cost estimate using ${costBasis} cost basis for the ${region} region. ALL rates must be in INR from the CPWD DSR rate table provided. CRITICAL: Use the EXACT rates from the table — Excavation MUST be ₹398/m³ [DSR 2.1], PCC M15 MUST be ₹5,862/m³ [DSR 4.2], RCC M30 MUST be ₹7,894/m³ [DSR 4.9], Steel Fe500 MUST be ₹78.50/kg [DSR 5.1]. Copy numbers exactly from the table. Do NOT modify, round, or fabricate rates. Follow the MANDATORY ANALYSIS PROTOCOL — analyze the drawing FIRST, then generate cost data.`;
       const result = await callClaude(apiKey, buildCostEstimatePrompt(), userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
@@ -162,12 +195,15 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
         confirmed: i.confirmed !== false,
       }));
       setData({
+        drawingAnalysis: parsed.drawingAnalysis || null,
         items,
         veOpportunities: parsed.veOpportunities || [],
         cashFlow: parsed.cashFlow || [],
         clarificationsNeeded: parsed.clarificationsNeeded || [],
         assumptions: parsed.assumptions || [],
         exclusions: parsed.exclusions || [],
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || [],
       });
       onStatusChange('complete');
     } catch (e: any) { setError(e.message); }
@@ -386,6 +422,77 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
       {/* Results */}
       {data && !loading && (
         <>
+          {/* 📐 Drawing Analysis Card */}
+          {data.drawingAnalysis && (
+            <div style={{ ...card, border: '2px solid #2563eb', background: 'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#2563eb' }}>📐 Drawing Analysis</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <p style={{ margin: 0 }}><strong>Drawing Type:</strong> {data.drawingAnalysis.drawingType}</p>
+                <p style={{ margin: 0 }}><strong>Building Type:</strong> {data.drawingAnalysis.buildingType}</p>
+              </div>
+              {data.drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Visible Elements:</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                    {data.drawingAnalysis.visibleElements.map((e: string, i: number) => (
+                      <span key={i} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, background: '#dbeafe', color: '#1e40af' }}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Readable Dimensions:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {data.drawingAnalysis.readableDimensions.map((d: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{ marginTop: '8px' }}><strong>Specifications on Drawing:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {data.drawingAnalysis.specsOnDrawing.map((s: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.scale && <p style={{ marginTop: '4px', marginBottom: 0 }}><strong>Scale:</strong> {data.drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
+          {/* ⚠️ Gaps & Missing Information */}
+          {data.gaps && data.gaps.length > 0 && (
+            <div style={{ ...card, border: '2px solid #f59e0b', background: '#fffbeb', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#d97706' }}>⚠️ Gaps & Missing Information ({data.gaps.length})</h3>
+              {data.gaps.map((g: any, i: number) => (
+                <div key={i} style={{ padding: '8px 0', borderBottom: i < data.gaps!.length - 1 ? '1px solid #fde68a' : 'none', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600, background: g.priority === 'HIGH' ? '#ef4444' : g.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6', color: '#fff', flexShrink: 0, minWidth: '55px', textAlign: 'center' }}>{g.priority}</span>
+                  <span style={{ fontSize: '13px' }}>{g.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 💬 Stakeholder Questions */}
+          {data.consultantQuestions && data.consultantQuestions.length > 0 && (
+            <div style={{ ...card, border: '2px solid #7c3aed', background: '#f5f3ff', marginBottom: 16 }}>
+              <h3 style={{ ...secTitle, color: '#7c3aed' }}>💬 Stakeholder Questions ({data.consultantQuestions.length})</h3>
+              {['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].map(role => {
+                const qs = data.consultantQuestions!.filter((q: any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{ marginBottom: '12px' }}>
+                    <h4 style={{ fontWeight: 600, color: '#4c1d95', margin: '8px 0 4px', fontSize: '14px' }}>{role}</h4>
+                    {qs.map((q: any, i: number) => (
+                      <div key={i} style={{ padding: '6px 8px', borderBottom: '1px solid #e9e5f5', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600, background: q.priority === 'HIGH' ? '#ef4444' : '#f59e0b', color: '#fff', flexShrink: 0 }}>{q.priority}</span>
+                        <div><span style={{ fontSize: '13px' }}>{q.question}</span>
+                          {q.impactArea && <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '8px' }}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 24 }}>
             {summaryCards.map((c, i) => (
@@ -423,7 +530,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
                 </thead>
                 <tbody>
                   {data.items.map((item, i) => (
-                    <tr key={i} style={{ background: item.confirmed ? 'transparent' : '#fffbeb' }}>
+                    <tr key={i} style={{ background: item.confirmed === false ? '#fef9c3' : 'transparent' }}>
                       <td style={{ ...td, fontFamily: 'monospace', fontSize: 12 }}>{item.csiCode}</td>
                       <td style={td}>
                         <div style={{ fontSize: 13 }}>{item.description}</div>

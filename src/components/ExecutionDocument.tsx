@@ -23,6 +23,14 @@ interface WBSItem {
 }
 
 interface ExecutionData {
+  drawingAnalysis?: {
+    drawingType: string;
+    buildingType: string;
+    visibleElements: string[];
+    readableDimensions: string[];
+    specsOnDrawing: string[];
+    scale: string;
+  };
   constructionSequence: { phase: string; activities: string[]; duration: string; keyStandards: string }[];
   wbs: WBSItem[];
   qcPlan: { activity: string; standard: string; testMethod: string; frequency: string; acceptanceCriteria: string }[];
@@ -30,6 +38,8 @@ interface ExecutionData {
   commissioning: string[];
   clarificationsNeeded: { question: string; directedTo: string; priority: string; reason: string }[];
   assumptions: string[];
+  gaps?: { priority: string; description: string }[];
+  consultantQuestions?: { to: string; question: string; priority: string; impactArea: string }[];
 }
 
 type TabKey = 'sequence' | 'wbs' | 'qc' | 'safety' | 'commissioning' | 'clarifications';
@@ -58,14 +68,24 @@ export const ExecutionDocument: React.FC<Props> = ({ drawings, selectedDrawingId
     try {
       const systemPrompt = `You are a senior construction project planner (PMP/CIOB/PMI-SP certified, 25+ years experience) preparing execution plans for Tier-1 contractors (L&T, Sobha, Danube, Nagarjuna). Your execution document will be reviewed by project directors and client PMCs.
 
-DRAWING ANALYSIS FIRST:
-Before generating the plan, deeply analyze every element visible in the drawings:
-- Building type, configuration, number of floors, structural system
-- Foundation types visible, column grid layout
-- Wall types, partition layouts, opening schedules
-- MEP provisions, riser locations, service corridors
-- Site access constraints, adjacent structures
-- Any dimensions, annotations, notes, specifications marked on drawings
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type, but NOT explicitly shown. State your assumption: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — EXECUTION DOCUMENT DATA:
+Generate execution planning data based on what is VISIBLE in the drawings. Extrapolate only where standard practice allows.
 
 CONSTRUCTION SEQUENCE REQUIREMENTS:
 - Generate 15-25 phases with detailed sub-activities per phase
@@ -90,26 +110,43 @@ SAFETY PLAN REQUIREMENTS:
 - Reference OSHA 29 CFR 1926, IS 3696, IS 4130, BOCW Act, local municipality requirements
 - Include: excavation, formwork, working at height, crane operations, electrical, confined space, hot work
 
-CLARIFICATIONS NEEDED (CRITICAL):
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"What is the specified floor finish for the auditorium seating area? Drawing shows only outline without finish schedule.", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
+CLARIFICATIONS NEEDED (in addition to consultantQuestions):
 - List 10-20 questions that need answers from architects/engineers/consultants
 - Group by: Structural Engineer, Architect, MEP Consultant, Geotechnical, Client
 - Priority: Critical (blocks execution), High (affects cost/schedule), Medium (design clarification)
 - Example: {"question":"Foundation design details and soil bearing capacity report required","directedTo":"Structural Engineer / Geotechnical","priority":"Critical","reason":"Cannot commence substructure without confirmed foundation design and SBC values"}
 
 Return JSON object format:
-{"constructionSequence":[{"phase":"Phase 1: Enabling Works & Site Preparation","activities":["Site clearing and demolition of existing structures","Temporary fencing, site office, and welfare facilities setup","Setting out and benchmarking per grid layout","Temporary utilities (water, power, drainage) connection","Environmental protection measures and tree protection"],"duration":"3-4 weeks","keyStandards":"IS 3764:1992/OSHA 1926.550"}],"wbs":[{"code":"1.0","task":"Enabling Works","duration":"4 weeks","predecessor":"-","resources":"Survey team, laborers, JCB, tipper","deliverable":"Site ready for construction"}],"qcPlan":[{"activity":"RCC Foundation Concrete","standard":"IS 456:2000 Cl. 15.2, IS 516:1959","testMethod":"Cube test 150mm - 28 day compressive strength","frequency":"1 set per 5 m³ or per pour","acceptanceCriteria":"Mean ≥ fck + 0.825×s"}],"safetyPlan":[{"hazard":"Fall from height during formwork","riskLevel":"Critical","control":"Full body harness with double lanyard, safety net below 6m, guardrails at all edges","standard":"IS 3696:1991, OSHA 1926.502","ppe":"Full body harness, hard hat, safety shoes, high-vis vest"}],"commissioning":["HVAC system testing and balancing per ASHRAE 111","Fire alarm and detection system testing per IS 2189","Lift installation testing per IS 14665","DG set load testing and synchronization"],"clarificationsNeeded":[{"question":"Structural design calculations and foundation details","directedTo":"Structural Engineer","priority":"Critical","reason":"Cannot proceed with substructure without confirmed structural design"}],"assumptions":["Soil bearing capacity assumed at 150 kN/m² pending geotechnical report","Water table assumed below foundation level","No contaminated soil conditions assumed"]}`;
-      const userMsg = 'Generate a comprehensive, contract-grade execution document from these construction drawings. This document will be reviewed by project directors at Tier-1 firms. Analyze every element visible in the drawings. For EVERY activity: cite the applicable IS/BS/ASTM standard, provide realistic durations, and identify all clarifications needed from architects, structural engineers, and MEP consultants. List ALL assumptions made.';
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["walls","columns","beams"],"readableDimensions":["Overall: 45m × 30m"],"specsOnDrawing":["M25 concrete noted"],"scale":"1:100"},"constructionSequence":[{"phase":"Phase 1: Enabling Works & Site Preparation","activities":["Site clearing and demolition of existing structures","Temporary fencing, site office, and welfare facilities setup","Setting out and benchmarking per grid layout","Temporary utilities (water, power, drainage) connection","Environmental protection measures and tree protection"],"duration":"3-4 weeks","keyStandards":"IS 3764:1992/OSHA 1926.550"}],"wbs":[{"code":"1.0","task":"Enabling Works","duration":"4 weeks","predecessor":"-","resources":"Survey team, laborers, JCB, tipper","deliverable":"Site ready for construction"}],"qcPlan":[{"activity":"RCC Foundation Concrete","standard":"IS 456:2000 Cl. 15.2, IS 516:1959","testMethod":"Cube test 150mm - 28 day compressive strength","frequency":"1 set per 5 m³ or per pour","acceptanceCriteria":"Mean ≥ fck + 0.825×s"}],"safetyPlan":[{"hazard":"Fall from height during formwork","riskLevel":"Critical","control":"Full body harness with double lanyard, safety net below 6m, guardrails at all edges","standard":"IS 3696:1991, OSHA 1926.502","ppe":"Full body harness, hard hat, safety shoes, high-vis vest"}],"commissioning":["HVAC system testing and balancing per ASHRAE 111","Fire alarm and detection system testing per IS 2189"],"clarificationsNeeded":[{"question":"Structural design calculations and foundation details","directedTo":"Structural Engineer","priority":"Critical","reason":"Cannot proceed with substructure without confirmed structural design"}],"assumptions":["Soil bearing capacity assumed at 150 kN/m² pending geotechnical report","Water table assumed below foundation level"],"gaps":[{"priority":"HIGH","description":"Foundation design not shown — need structural engineer's foundation layout drawing"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and cost"}]}`;
+      const userMsg = 'Generate a comprehensive, contract-grade execution document from these construction drawings. This document will be reviewed by project directors at Tier-1 firms. Analyze every element visible in the drawings. For EVERY activity: cite the applicable IS/BS/ASTM standard, provide realistic durations, and identify all clarifications needed from architects, structural engineers, and MEP consultants. List ALL assumptions made. Return a JSON OBJECT with drawingAnalysis, constructionSequence, wbs, qcPlan, safetyPlan, commissioning, clarificationsNeeded, assumptions, gaps, and consultantQuestions fields.';
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
       setData({
+        drawingAnalysis: parsed.drawingAnalysis || undefined,
         constructionSequence: parsed.constructionSequence || [],
         wbs: (parsed.wbs || []).map((w: any) => ({ ...w, resources: w.resources || '', deliverable: w.deliverable || '' })),
         qcPlan: parsed.qcPlan || [],
         safetyPlan: parsed.safetyPlan || [],
         commissioning: parsed.commissioning || [],
         clarificationsNeeded: parsed.clarificationsNeeded || [],
-        assumptions: parsed.assumptions || []
+        assumptions: parsed.assumptions || [],
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || []
       });
       setCommissioningChecks({});
       onStatusChange('complete');
@@ -289,6 +326,11 @@ Return JSON object format:
     downloadTXT(text, 'execution-document.txt');
   };
 
+  const badgeStyle = (bg: string, color: string, extra?: React.CSSProperties): React.CSSProperties => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+    background: bg, color, ...extra
+  });
+
   const tabStyle = (key: TabKey): React.CSSProperties => ({
     padding: '8px 16px',
     fontSize: 13,
@@ -356,6 +398,77 @@ Return JSON object format:
               <span style={{ marginLeft: 4 }}>Export TXT</span>
             </button>
           </div>
+
+          {/* Drawing Analysis Card */}
+          {data.drawingAnalysis && (
+            <div style={{...card, border:'2px solid #2563eb', background:'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#2563eb'}}>📐 Drawing Analysis</h3>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+                <p style={{margin:0}}><strong>Drawing Type:</strong> {data.drawingAnalysis.drawingType}</p>
+                <p style={{margin:0}}><strong>Building Type:</strong> {data.drawingAnalysis.buildingType}</p>
+              </div>
+              {data.drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Visible Elements:</strong>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'4px'}}>
+                    {data.drawingAnalysis.visibleElements.map((e:string,i:number) => (
+                      <span key={i} style={badgeStyle('#dbeafe','#1e40af')}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Readable Dimensions:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.readableDimensions.map((d:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Specifications on Drawing:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.specsOnDrawing.map((s:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.scale && <p style={{marginTop:'4px',marginBottom:0}}><strong>Scale:</strong> {data.drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
+          {/* Gaps Section */}
+          {data.gaps && data.gaps.length > 0 && (
+            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#d97706'}}>⚠️ Gaps & Missing Information ({data.gaps.length})</h3>
+              {data.gaps.map((g:any,i:number) => (
+                <div key={i} style={{padding:'8px 0',borderBottom:i<(data.gaps?.length||0)-1?'1px solid #fde68a':'none',display:'flex',gap:'8px',alignItems:'flex-start'}}>
+                  <span style={badgeStyle(g.priority==='HIGH'?'#ef4444':g.priority==='MEDIUM'?'#f59e0b':'#3b82f6','#fff',{flexShrink:0,minWidth:'55px',textAlign:'center'})}>{g.priority}</span>
+                  <span style={{fontSize:'13px'}}>{g.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Consultant Questions Section */}
+          {data.consultantQuestions && data.consultantQuestions.length > 0 && (
+            <div style={{...card, border:'2px solid #7c3aed', background:'#f5f3ff', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#7c3aed'}}>💬 Stakeholder Questions ({data.consultantQuestions.length})</h3>
+              {['Architect','Structural Engineer','MEP Consultant','QS/Cost Consultant'].map(role => {
+                const qs = (data.consultantQuestions || []).filter((q:any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{marginBottom:'12px'}}>
+                    <h4 style={{fontWeight:600,color:'#4c1d95',margin:'8px 0 4px',fontSize:'14px'}}>{role}</h4>
+                    {qs.map((q:any,i:number) => (
+                      <div key={i} style={{padding:'6px 8px',borderBottom:'1px solid #e9e5f5',display:'flex',gap:'6px',alignItems:'flex-start'}}>
+                        <span style={badgeStyle(q.priority==='HIGH'?'#ef4444':'#f59e0b','#fff',{flexShrink:0})}>{q.priority}</span>
+                        <div><span style={{fontSize:'13px'}}>{q.question}</span>
+                          {q.impactArea && <span style={{fontSize:'11px',color:'#6b7280',marginLeft:'8px'}}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
 
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: `1px solid ${C.bdr}`, marginBottom: 20, overflowX: 'auto' }}>

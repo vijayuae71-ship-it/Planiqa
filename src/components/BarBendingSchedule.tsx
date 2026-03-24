@@ -56,6 +56,7 @@ export const BarBendingSchedule: React.FC<Props> = ({ drawings, selectedDrawingI
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<BBSItem>>({});
   const [showShapeCodes, setShowShapeCodes] = useState(false);
+  const [aiMeta, setAiMeta] = useState<{ drawingAnalysis?: any; gaps?: any[]; consultantQuestions?: any[] } | null>(null);
 
   const generate = async () => {
     const selected = getSelectedDrawings(drawings, selectedDrawingIds);
@@ -63,7 +64,24 @@ export const BarBendingSchedule: React.FC<Props> = ({ drawings, selectedDrawingI
     setLoading(true);
     setError('');
     try {
-      const systemPrompt = `You are a senior structural engineer / rebar detailer (20+ years experience, ISE/IStructE level) preparing a bar bending schedule for Tier-1 contractors per ${standard}.
+      const systemPrompt = `MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY item you generate:
+- "confirmed": true → This item has explicit dimensions/specs/quantities readable from the drawing. Cite the source: "As shown on drawing: 12m × 8m stage area"
+- "confirmed": false → This item is professionally assumed based on standard practice for this building type, but NOT explicitly shown. State your assumption: "Assumed: Standard 230mm brick wall as per common practice for auditoriums"
+
+STEP 3 — BAR BENDING SCHEDULE DATA:
+You are a senior structural engineer / rebar detailer (20+ years experience, ISE/IStructE level) preparing a bar bending schedule for Tier-1 contractors per ${standard}.
 
 DRAWING ANALYSIS:
 First, carefully identify every structural member visible:
@@ -107,13 +125,28 @@ GENERATE 30-60+ BAR ENTRIES for a typical floor/structure. Include:
 - Lapping bars (separate entry for laps)
 - Distribution steel for slabs
 
-Return JSON array format:
-[{"member":"Foundation F1","barMark":"A1","type":"Deformed","diameter":16,"shapeCode":"00","a":4160,"b":0,"c":0,"r":0,"length":4160,"quantity":12,"lengthBasis":"3000mm clear span + 2×40d dev (1280) - 2×40mm cover = 4160mm","confirmed":true}]`;
-      const userMsg = `Generate a detailed, professional bar bending schedule per ${standard} from these construction drawings. This BBS will be used for rebar procurement by a Tier-1 contractor. For EVERY bar: show the cutting length calculation basis (span + development - cover + hooks), use correct shape codes, and mark confirmed vs estimated items. Generate at least 30 entries covering all identifiable structural members.`;
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Structural Engineer", "question":"What is the grade of steel specified? Drawing shows rebar layout but no material specification.", "priority":"HIGH", "impactArea":"Material procurement and BBS accuracy"}
+
+Return a JSON OBJECT (not array):
+{"drawingAnalysis":{"drawingType":"Structural Detail - Foundation/Column Layout","buildingType":"Commercial - Office Building","visibleElements":["columns","beams","slabs","foundations"],"readableDimensions":["Column grid: 6m c/c","Beam B1: 300x600mm"],"specsOnDrawing":["M25 grade concrete","Fe500 steel"],"scale":"1:50"},"items":[{"member":"Foundation F1","barMark":"A1","type":"Deformed","diameter":16,"shapeCode":"00","a":4160,"b":0,"c":0,"r":0,"length":4160,"quantity":12,"lengthBasis":"3000mm clear span + 2×40d dev (1280) - 2×40mm cover = 4160mm","confirmed":true}],"gaps":[{"priority":"HIGH","description":"Reinforcement details for beams not shown — need structural engineer's beam schedule"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid?","priority":"HIGH","impactArea":"Substructure scope and rebar quantities"}]}`;
+      const userMsg = `Generate a detailed, professional bar bending schedule per ${standard} from these construction drawings. This BBS will be used for rebar procurement by a Tier-1 contractor. For EVERY bar: show the cutting length calculation basis (span + development - cover + hooks), use correct shape codes, and mark confirmed vs estimated items. Generate at least 30 entries covering all identifiable structural members. Follow the MANDATORY ANALYSIS PROTOCOL — analyze the drawing FIRST, then generate BBS data.`;
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
-      const newItems: BBSItem[] = (Array.isArray(parsed) ? parsed : (parsed.items || [])).map((item: any) => ({
+      const rawItems = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const newItems: BBSItem[] = rawItems.map((item: any) => ({
         id: uid(),
         member: item.member || '',
         barMark: item.barMark || '',
@@ -130,6 +163,11 @@ Return JSON array format:
         confirmed: item.confirmed !== false,
       }));
       setItems(newItems);
+      setAiMeta({
+        drawingAnalysis: parsed.drawingAnalysis || null,
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || [],
+      });
       onStatusChange('complete');
     } catch (e: any) {
       setError(e.message);
@@ -376,6 +414,77 @@ Return JSON array format:
         </div>
       )}
 
+      {/* 📐 Drawing Analysis Card */}
+      {aiMeta?.drawingAnalysis && (
+        <div style={{ ...card, border: '2px solid #2563eb', background: 'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16 }}>
+          <h3 style={{ ...secTitle, color: '#2563eb' }}>📐 Drawing Analysis</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <p style={{ margin: 0 }}><strong>Drawing Type:</strong> {aiMeta.drawingAnalysis.drawingType}</p>
+            <p style={{ margin: 0 }}><strong>Building Type:</strong> {aiMeta.drawingAnalysis.buildingType}</p>
+          </div>
+          {aiMeta.drawingAnalysis.visibleElements?.length > 0 && (
+            <div style={{ marginTop: '8px' }}><strong>Visible Elements:</strong>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                {aiMeta.drawingAnalysis.visibleElements.map((e: string, i: number) => (
+                  <span key={i} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, background: '#dbeafe', color: '#1e40af' }}>{e}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {aiMeta.drawingAnalysis.readableDimensions?.length > 0 && (
+            <div style={{ marginTop: '8px' }}><strong>Readable Dimensions:</strong>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                {aiMeta.drawingAnalysis.readableDimensions.map((d: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{d}</li>)}
+              </ul>
+            </div>
+          )}
+          {aiMeta.drawingAnalysis.specsOnDrawing?.length > 0 && (
+            <div style={{ marginTop: '8px' }}><strong>Specifications on Drawing:</strong>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                {aiMeta.drawingAnalysis.specsOnDrawing.map((s: string, i: number) => <li key={i} style={{ fontSize: '13px' }}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+          {aiMeta.drawingAnalysis.scale && <p style={{ marginTop: '4px', marginBottom: 0 }}><strong>Scale:</strong> {aiMeta.drawingAnalysis.scale}</p>}
+        </div>
+      )}
+
+      {/* ⚠️ Gaps & Missing Information */}
+      {aiMeta?.gaps && aiMeta.gaps.length > 0 && (
+        <div style={{ ...card, border: '2px solid #f59e0b', background: '#fffbeb', marginBottom: 16 }}>
+          <h3 style={{ ...secTitle, color: '#d97706' }}>⚠️ Gaps & Missing Information ({aiMeta.gaps.length})</h3>
+          {aiMeta.gaps.map((g: any, i: number) => (
+            <div key={i} style={{ padding: '8px 0', borderBottom: i < aiMeta.gaps!.length - 1 ? '1px solid #fde68a' : 'none', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600, background: g.priority === 'HIGH' ? '#ef4444' : g.priority === 'MEDIUM' ? '#f59e0b' : '#3b82f6', color: '#fff', flexShrink: 0, minWidth: '55px', textAlign: 'center' }}>{g.priority}</span>
+              <span style={{ fontSize: '13px' }}>{g.description}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 💬 Stakeholder Questions */}
+      {aiMeta?.consultantQuestions && aiMeta.consultantQuestions.length > 0 && (
+        <div style={{ ...card, border: '2px solid #7c3aed', background: '#f5f3ff', marginBottom: 16 }}>
+          <h3 style={{ ...secTitle, color: '#7c3aed' }}>💬 Stakeholder Questions ({aiMeta.consultantQuestions.length})</h3>
+          {['Architect', 'Structural Engineer', 'MEP Consultant', 'QS/Cost Consultant'].map(role => {
+            const qs = aiMeta.consultantQuestions!.filter((q: any) => q.to === role);
+            return qs.length > 0 ? (
+              <div key={role} style={{ marginBottom: '12px' }}>
+                <h4 style={{ fontWeight: 600, color: '#4c1d95', margin: '8px 0 4px', fontSize: '14px' }}>{role}</h4>
+                {qs.map((q: any, i: number) => (
+                  <div key={i} style={{ padding: '6px 8px', borderBottom: '1px solid #e9e5f5', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600, background: q.priority === 'HIGH' ? '#ef4444' : '#f59e0b', color: '#fff', flexShrink: 0 }}>{q.priority}</span>
+                    <div><span style={{ fontSize: '13px' }}>{q.question}</span>
+                      {q.impactArea && <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '8px' }}>→ {q.impactArea}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null;
+          })}
+        </div>
+      )}
+
       {loading && (
         <div style={{ textAlign: 'center', padding: 40 }}>
           <div className="spinner" style={{ margin: '0 auto 12px' }} />
@@ -462,7 +571,7 @@ Return JSON array format:
                   }
 
                   return (
-                    <tr key={item.id} style={{ cursor: 'pointer', background: item.confirmed ? 'transparent' : '#fffbeb' }} onDoubleClick={() => startEdit(item)}>
+                    <tr key={item.id} style={{ cursor: 'pointer', background: item.confirmed === false ? '#fef9c3' : 'transparent' }} onDoubleClick={() => startEdit(item)}>
                       <td style={{ ...td, fontWeight: 600 }}>
                         {item.member}
                         {item.lengthBasis && <div style={{ fontSize: 10, color: C.tx3, fontWeight: 400, fontStyle: 'italic', marginTop: 2 }}>{item.lengthBasis}</div>}

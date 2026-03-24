@@ -21,6 +21,7 @@ interface Change {
   impact: string;
   actionRequired: string;
   costImplication: string;
+  confirmed: boolean;
 }
 
 interface TradeImpact {
@@ -37,21 +38,47 @@ interface ChangeOrder {
 }
 
 interface CompareData {
+  drawingAnalysis?: {
+    drawingType: string;
+    buildingType: string;
+    visibleElements: string[];
+    readableDimensions: string[];
+    specsOnDrawing: string[];
+    scale: string;
+  };
   changes: Change[];
   tradeImpact: TradeImpact[];
   changeOrderMagnitude: ChangeOrder;
   rfisRequired: { question: string; directedTo: string; priority: string }[];
   assumptions: string[];
   scheduleImpact: string;
+  gaps?: { priority: string; description: string }[];
+  consultantQuestions?: { to: string; question: string; priority: string; impactArea: string }[];
 }
 
 const SYSTEM_PROMPT = `You are a senior construction document controller and claims specialist (20+ years, FIDIC/NEC certified) performing revision comparison for Tier-1 contractors. Your report will be used for change order management, cost impact assessment, and dispute resolution.
 
-ANALYSIS METHODOLOGY:
-1. Systematically scan EVERY element in both revisions: structural grid, dimensions, room layouts, openings, annotations, notes, specifications
-2. Compare element-by-element: foundations, columns, beams, slabs, walls, openings, MEP routes, finishes
-3. For each change: describe EXACTLY what changed (old value → new value) with measurements
-4. Classify impact: structural changes get "High", cost/schedule get "Medium", cosmetic get "Low"
+MANDATORY ANALYSIS PROTOCOL — FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 — DRAWING INTERPRETATION (DO THIS FIRST):
+Carefully examine the uploaded drawing(s)/document(s). Before generating ANY module data, analyze and report:
+- What type of drawing is this? (floor plan, section, elevation, structural detail, schedule, site plan, MEP layout)
+- What building/structure type? (residential villa, commercial office, auditorium, warehouse, hospital, etc.)
+- List every visible element: walls, columns, beams, slabs, openings (doors/windows), stairs, ramps, services, annotations, room labels, dimensions
+- List all readable dimensions with locations (e.g., "Overall building: 45m × 30m", "Column grid: 6m c/c both ways", "Room R1: 5m × 4m")
+- Note any specifications, material callouts, or standards referenced on the drawing
+- Note the scale if shown
+
+STEP 2 — CONFIRMED vs ASSUMED:
+For EVERY change you identify:
+- "confirmed": true → This change has explicit visual evidence visible in the drawings being compared. Cite evidence: "Column C3 dimension changed from 300×300 to 450×450 as clearly visible in both revisions"
+- "confirmed": false → This change is professionally inferred based on related changes but not directly measured. State basis: "Assumed: Foundation size increase likely required due to column size increase"
+
+STEP 3 — REVISION COMPARISON ANALYSIS:
+Systematically scan EVERY element in both revisions: structural grid, dimensions, room layouts, openings, annotations, notes, specifications.
+Compare element-by-element: foundations, columns, beams, slabs, walls, openings, MEP routes, finishes.
+For each change: describe EXACTLY what changed (old value → new value) with measurements.
+Classify impact: structural changes get "High", cost/schedule get "Medium", cosmetic get "Low".
 
 CHANGE TYPES:
 - Added: New element not present in Revision A
@@ -78,8 +105,22 @@ GENERATE 15-40+ CHANGES for a typical revision. Be thorough. Check:
 
 RFIs: List 5-15 questions that need answers from the design team to properly assess changes.
 
-Return JSON:
-{"changes":[{"area":"Grid B-3, Foundation F3","type":"Modified","description":"Pad footing size increased from 2.0×2.0×0.5m to 2.5×2.5×0.6m deep — additional concrete 2.25m³, additional excavation 1.75m³","trade":"Structural","impact":"High","actionRequired":"Re-price substructure package, verify soil bearing capacity adequacy for increased load","costImplication":"Increase ~₹45,000 (concrete + excavation + rebar)"}],"tradeImpact":[{"trade":"Structural","changes":5,"severity":"High","costImpact":"Increase ~12-15% on substructure package"}],"changeOrderMagnitude":{"estimated":250000,"confidence":"Medium","notes":"Based on visible structural changes. MEP impact not quantifiable without services drawings."},"rfisRequired":[{"question":"Please confirm revised foundation loading schedule for modified pad footings at Grid B-3 and C-4","directedTo":"Structural Engineer","priority":"Critical"}],"assumptions":["Existing soil conditions remain unchanged","MEP routing not significantly affected by structural changes"],"scheduleImpact":"Estimated 2-3 weeks additional time for revised foundation work. Critical path may be affected if substructure is on-going."}`;
+STEP 4 — GAPS & MISSING INFORMATION:
+Identify what information is NOT in the drawing but NEEDED for this module. Categorize by priority:
+- HIGH: Critical — will significantly impact scope, cost, or schedule if not clarified
+- MEDIUM: Important — needed for detailed design/execution
+- LOW: Desirable — for optimization or best practice
+
+STEP 5 — STAKEHOLDER QUESTIONS:
+Generate professional RFI-style questions directed at specific consultants:
+- Architect: Design intent, finishes, aesthetic requirements
+- Structural Engineer: Loading, reinforcement, foundation design
+- MEP Consultant: Services capacity, routing, equipment specifications
+- QS/Cost Consultant: Budget, procurement, value engineering
+Each question: {"to":"Architect", "question":"What is the specified floor finish for the auditorium seating area? Drawing shows only outline without finish schedule.", "priority":"HIGH", "impactArea":"Finishes cost and material procurement"}
+
+Return JSON object:
+{"drawingAnalysis":{"drawingType":"Floor Plan - Ground Floor","buildingType":"Commercial - Auditorium","visibleElements":["walls","columns","beams"],"readableDimensions":["Overall: 45m × 30m"],"specsOnDrawing":["M25 concrete noted"],"scale":"1:100"},"changes":[{"area":"Grid B-3, Foundation F3","type":"Modified","description":"Pad footing size increased from 2.0×2.0×0.5m to 2.5×2.5×0.6m deep — additional concrete 2.25m³, additional excavation 1.75m³","trade":"Structural","impact":"High","actionRequired":"Re-price substructure package, verify soil bearing capacity adequacy for increased load","costImplication":"Increase ~₹45,000 (concrete + excavation + rebar)","confirmed":true}],"tradeImpact":[{"trade":"Structural","changes":5,"severity":"High","costImpact":"Increase ~12-15% on substructure package"}],"changeOrderMagnitude":{"estimated":250000,"confidence":"Medium","notes":"Based on visible structural changes. MEP impact not quantifiable without services drawings."},"rfisRequired":[{"question":"Please confirm revised foundation loading schedule for modified pad footings at Grid B-3 and C-4","directedTo":"Structural Engineer","priority":"Critical"}],"assumptions":["Existing soil conditions remain unchanged","MEP routing not significantly affected by structural changes"],"scheduleImpact":"Estimated 2-3 weeks additional time for revised foundation work. Critical path may be affected if substructure is on-going.","gaps":[{"priority":"HIGH","description":"Foundation design not shown — need structural engineer's foundation layout drawing"}],"consultantQuestions":[{"to":"Structural Engineer","question":"What is the foundation type for the column grid? Drawing shows superstructure only.","priority":"HIGH","impactArea":"Substructure scope and cost"}]}`;
 
 
 export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds, apiKey, onStatusChange }) => {
@@ -91,6 +132,11 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
 
   const allDrawings = drawings;
 
+  const badgeStyle = (bg: string, color: string, extra?: React.CSSProperties): React.CSSProperties => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+    background: bg, color, ...extra
+  });
+
   const compare = async () => {
     if (!revA || !revB) { setError('Select both Revision A and Revision B'); return; }
     if (revA === revB) { setError('Please select two different drawings to compare'); return; }
@@ -101,21 +147,25 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
 
     setLoading(true); setError('');
     try {
-      const userMsg = `Compare these two drawing revisions and identify all changes between them. Revision A: "${drawingA.name}" and Revision B: "${drawingB.name}". Analyze carefully and list every difference.`;
+      const userMsg = `Compare these two drawing revisions and identify all changes between them. Revision A: "${drawingA.name}" and Revision B: "${drawingB.name}". Analyze carefully and list every difference. Return a JSON OBJECT (not array) with drawingAnalysis, changes, tradeImpact, changeOrderMagnitude, rfisRequired, assumptions, scheduleImpact, gaps, and consultantQuestions fields.`;
       const result = await callClaude(apiKey, SYSTEM_PROMPT, userMsg, [drawingA, drawingB]);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
       setData({
+        drawingAnalysis: parsed.drawingAnalysis || undefined,
         changes: (parsed.changes || []).map((c: any) => ({
           ...c,
           actionRequired: c.actionRequired || '',
           costImplication: c.costImplication || '',
+          confirmed: c.confirmed !== false,
         })),
         tradeImpact: parsed.tradeImpact || [],
         changeOrderMagnitude: parsed.changeOrderMagnitude || { estimated: 0, confidence: 'Low', notes: '' },
         rfisRequired: parsed.rfisRequired || [],
         assumptions: parsed.assumptions || [],
         scheduleImpact: parsed.scheduleImpact || '',
+        gaps: parsed.gaps || [],
+        consultantQuestions: parsed.consultantQuestions || [],
       });
       onStatusChange('complete');
     } catch (e: any) { setError(e.message); }
@@ -154,9 +204,17 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
     txt += `Revision A: ${dA?.name || revA}\n`;
     txt += `Revision B: ${dB?.name || revB}\n\n`;
     txt += `Summary: ${changeSummary.added} Added, ${changeSummary.modified} Modified, ${changeSummary.deleted} Deleted\n\n`;
+    if (data.drawingAnalysis) {
+      txt += 'DRAWING ANALYSIS\n' + '-'.repeat(40) + '\n';
+      txt += `Drawing Type: ${data.drawingAnalysis.drawingType}\n`;
+      txt += `Building Type: ${data.drawingAnalysis.buildingType}\n`;
+      if (data.drawingAnalysis.visibleElements?.length) txt += `Visible Elements: ${data.drawingAnalysis.visibleElements.join(', ')}\n`;
+      if (data.drawingAnalysis.readableDimensions?.length) txt += `Dimensions: ${data.drawingAnalysis.readableDimensions.join('; ')}\n`;
+      txt += '\n';
+    }
     txt += 'CHANGES\n' + '-'.repeat(40) + '\n';
     data.changes.forEach((c, i) => {
-      txt += `\n${i + 1}. [${c.type}] ${c.area}\n`;
+      txt += `\n${i + 1}. [${c.type}] ${c.area} ${c.confirmed ? '[CONFIRMED]' : '[ASSUMED]'}\n`;
       txt += `   Trade: ${c.trade} | Impact: ${c.impact}\n`;
       txt += `   ${c.description}\n`;
     });
@@ -170,6 +228,10 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
       txt += `Confidence: ${data.changeOrderMagnitude.confidence}\n`;
       txt += `Notes: ${data.changeOrderMagnitude.notes}\n`;
     }
+    if (data.gaps && data.gaps.length > 0) {
+      txt += '\n\nGAPS & MISSING INFORMATION\n' + '-'.repeat(40) + '\n';
+      data.gaps.forEach((g, i) => { txt += `${i + 1}. [${g.priority}] ${g.description}\n`; });
+    }
     downloadTXT(txt, 'revision-comparison');
   };
 
@@ -178,6 +240,21 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
     const sections: PDFSection[] = [];
     const dA = allDrawings.find(d => d.id === revA);
     const dB = allDrawings.find(d => d.id === revB);
+
+    // Drawing analysis
+    if (data.drawingAnalysis) {
+      sections.push({
+        type: 'keyvalue',
+        title: 'Drawing Analysis',
+        items: [
+          { label: 'Drawing Type', value: data.drawingAnalysis.drawingType || '' },
+          { label: 'Building Type', value: data.drawingAnalysis.buildingType || '' },
+          { label: 'Scale', value: data.drawingAnalysis.scale || 'Not indicated' },
+          ...(data.drawingAnalysis.visibleElements?.length ? [{ label: 'Visible Elements', value: data.drawingAnalysis.visibleElements.join(', ') }] : []),
+          ...(data.drawingAnalysis.readableDimensions?.length ? [{ label: 'Readable Dimensions', value: data.drawingAnalysis.readableDimensions.join('; ') }] : []),
+        ],
+      });
+    }
 
     // Comparison overview
     sections.push({
@@ -197,7 +274,7 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
     sections.push({
       type: 'table',
       title: 'Detected Changes',
-      headers: ['#', 'Area', 'Type', 'Description', 'Trade', 'Impact', 'Action Required', 'Cost Implication'],
+      headers: ['#', 'Area', 'Type', 'Description', 'Trade', 'Impact', 'Action Required', 'Cost Implication', 'Status'],
       rows: data.changes.map((c, i) => [
         String(i + 1),
         String(c.area ?? ''),
@@ -207,9 +284,12 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
         String(c.impact ?? ''),
         String(c.actionRequired ?? ''),
         String(c.costImplication ?? ''),
+        c.confirmed ? 'Confirmed' : 'Assumed',
       ]),
       summary: [
         { label: 'Total Changes', value: String(data.changes.length) },
+        { label: 'Confirmed', value: String(data.changes.filter(c => c.confirmed).length) },
+        { label: 'Assumed', value: String(data.changes.filter(c => !c.confirmed).length) },
       ],
     });
 
@@ -262,6 +342,16 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
           String(r.directedTo ?? ''),
           String(r.question ?? ''),
         ]),
+      });
+    }
+
+    // Gaps
+    if (data.gaps && data.gaps.length > 0) {
+      sections.push({
+        type: 'table',
+        title: 'Gaps & Missing Information',
+        headers: ['Priority', 'Description'],
+        rows: data.gaps.map(g => [String(g.priority ?? ''), String(g.description ?? '')]),
       });
     }
 
@@ -338,6 +428,77 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
 
       {data && !loading && (
         <>
+          {/* Drawing Analysis Card */}
+          {data.drawingAnalysis && (
+            <div style={{...card, border:'2px solid #2563eb', background:'linear-gradient(135deg,#eff6ff,#f0f7ff)', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#2563eb'}}>📐 Drawing Analysis</h3>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+                <p style={{margin:0}}><strong>Drawing Type:</strong> {data.drawingAnalysis.drawingType}</p>
+                <p style={{margin:0}}><strong>Building Type:</strong> {data.drawingAnalysis.buildingType}</p>
+              </div>
+              {data.drawingAnalysis.visibleElements?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Visible Elements:</strong>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'4px'}}>
+                    {data.drawingAnalysis.visibleElements.map((e:string,i:number) => (
+                      <span key={i} style={badgeStyle('#dbeafe','#1e40af')}>{e}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.drawingAnalysis.readableDimensions?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Readable Dimensions:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.readableDimensions.map((d:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.specsOnDrawing?.length > 0 && (
+                <div style={{marginTop:'8px'}}><strong>Specifications on Drawing:</strong>
+                  <ul style={{margin:'4px 0 0 16px',padding:0}}>
+                    {data.drawingAnalysis.specsOnDrawing.map((s:string,i:number) => <li key={i} style={{fontSize:'13px'}}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {data.drawingAnalysis.scale && <p style={{marginTop:'4px',marginBottom:0}}><strong>Scale:</strong> {data.drawingAnalysis.scale}</p>}
+            </div>
+          )}
+
+          {/* Gaps Section */}
+          {data.gaps && data.gaps.length > 0 && (
+            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#d97706'}}>⚠️ Gaps & Missing Information ({data.gaps.length})</h3>
+              {data.gaps.map((g:any,i:number) => (
+                <div key={i} style={{padding:'8px 0',borderBottom:i<(data.gaps?.length||0)-1?'1px solid #fde68a':'none',display:'flex',gap:'8px',alignItems:'flex-start'}}>
+                  <span style={badgeStyle(g.priority==='HIGH'?'#ef4444':g.priority==='MEDIUM'?'#f59e0b':'#3b82f6','#fff',{flexShrink:0,minWidth:'55px',textAlign:'center'})}>{g.priority}</span>
+                  <span style={{fontSize:'13px'}}>{g.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Consultant Questions Section */}
+          {data.consultantQuestions && data.consultantQuestions.length > 0 && (
+            <div style={{...card, border:'2px solid #7c3aed', background:'#f5f3ff', marginBottom: 16}}>
+              <h3 style={{...secTitle, color:'#7c3aed'}}>💬 Stakeholder Questions ({data.consultantQuestions.length})</h3>
+              {['Architect','Structural Engineer','MEP Consultant','QS/Cost Consultant'].map(role => {
+                const qs = (data.consultantQuestions || []).filter((q:any) => q.to === role);
+                return qs.length > 0 ? (
+                  <div key={role} style={{marginBottom:'12px'}}>
+                    <h4 style={{fontWeight:600,color:'#4c1d95',margin:'8px 0 4px',fontSize:'14px'}}>{role}</h4>
+                    {qs.map((q:any,i:number) => (
+                      <div key={i} style={{padding:'6px 8px',borderBottom:'1px solid #e9e5f5',display:'flex',gap:'6px',alignItems:'flex-start'}}>
+                        <span style={badgeStyle(q.priority==='HIGH'?'#ef4444':'#f59e0b','#fff',{flexShrink:0})}>{q.priority}</span>
+                        <div><span style={{fontSize:'13px'}}>{q.question}</span>
+                          {q.impactArea && <span style={{fontSize:'11px',color:'#6b7280',marginLeft:'8px'}}>→ {q.impactArea}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+
           {/* Change Detection Summary */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 14, marginBottom: 24 }}>
             {[
@@ -357,8 +518,10 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
           <div style={{ ...card, marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={secTitle}><AlertCircle size={16} style={{ marginRight: 6 }} />Detected Changes</h3>
-              <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
-              <button style={btnSm} onClick={exportTXT}><Download size={14} /> Export TXT</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={exportPDF} style={{ ...btnSm, background: '#dc2626', color: '#fff', borderRadius: 6 }}>📄 PDF</button>
+                <button style={btnSm} onClick={exportTXT}><Download size={14} /> Export TXT</button>
+              </div>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={tbl}>
@@ -379,7 +542,7 @@ export const CompareRevisions: React.FC<Props> = ({ drawings, selectedDrawingIds
                     const tc = typeColor(c.type);
                     const ic = impactColor(c.impact);
                     return (
-                      <tr key={i}>
+                      <tr key={i} style={{ background: c.confirmed === false ? '#fef9c3' : 'transparent' }}>
                         <td style={{ ...td, color: C.tx3, fontSize: 12 }}>{i + 1}</td>
                         <td style={{ ...td, fontWeight: 500, fontSize: 12 }}>{c.area}</td>
                         <td style={td}><span style={badge(tc.c, tc.bg)}>{c.type}</span></td>
