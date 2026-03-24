@@ -1,9 +1,14 @@
 import { Drawing } from '../types';
 
-// Robust JSON extraction from Claude responses (handles text before/after JSON, truncated responses)
+// Robust JSON extraction from Claude responses (handles text before/after JSON, truncated responses, code fences)
 export function extractJSON(text: string): any {
-  // First try: strip markdown code fences and parse
-  const stripped = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  // Aggressively strip ALL markdown code fence variations
+  let stripped = text
+    .replace(/^[\s\S]*?```(?:json|JSON|js|javascript)?\s*\n?/m, '') // Remove opening fence + anything before it
+    .replace(/\n?\s*```[\s\S]*$/m, '')  // Remove closing fence + anything after it
+    .trim();
+  // If no fences found, use original text
+  if (stripped === text.trim()) stripped = text.trim();
   try { return JSON.parse(stripped); } catch {}
 
   // Second try: find JSON array [...] in the text
@@ -352,14 +357,17 @@ export async function callClaude(
 
   content.push({ type: 'text', text: userMessage });
 
+  // Enforce raw JSON output — prevents Claude from wrapping in markdown code fences
+  const enhancedSystem = systemPrompt + '\n\nCRITICAL OUTPUT FORMAT RULE: Return ONLY raw JSON. Do NOT wrap in markdown code fences (```json```). Do NOT include any text before or after the JSON. The very first character of your response MUST be { or [ and the very last character MUST be } or ]. Any violation will cause a system parsing failure.';
+
   // Call the Netlify serverless function with STREAMING (prevents 504 timeout)
   const response = await fetch('/.netlify/functions/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      system: systemPrompt,
+      system: enhancedSystem,
       messages: [{ role: 'user', content }],
-      max_tokens: 16384,
+      max_tokens: 32768,
     }),
   });
 
