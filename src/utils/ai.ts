@@ -29,7 +29,7 @@ export function extractJSON(text: string): any {
 }
 
 // Embedded API key — used as fallback if serverless function doesn't have env var
-const EMBEDDED_API_KEY = ''  // Set via environment or Netlify function handles auth;
+const EMBEDDED_API_KEY = ''; // API key is handled server-side by Netlify function
 
 export function getEmbeddedApiKey(): string {
   return EMBEDDED_API_KEY;
@@ -322,7 +322,7 @@ export async function callClaude(
 
   content.push({ type: 'text', text: userMessage });
 
-  // Call the Netlify serverless function (API key is server-side)
+  // Call the Netlify serverless function with STREAMING (prevents 504 timeout)
   const response = await fetch('/.netlify/functions/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -337,21 +337,60 @@ export async function callClaude(
     let errMsg = `API returned status ${response.status}`;
     try {
       const errData = await response.json();
-      errMsg = errData?.error?.message || errMsg;
+      errMsg = errData?.error?.message || errData?.error || errMsg;
     } catch {}
     throw new Error(errMsg);
   }
 
-  const resp = await response.json();
+  // Read SSE stream from Claude (streamed through our serverless function)
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response stream available');
 
-  if (resp.error) throw new Error(resp.error.message || 'API error');
-  if (!resp.content?.[0]?.text) throw new Error('Empty API response — the AI returned no content. Please try again.');
+  const decoder = new TextDecoder();
+  let responseText = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let buffer = '';
 
-  const responseText = resp.content[0].text;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-  // Track usage
-  const inputTokens = resp.usage?.input_tokens || estimateTokens(systemPrompt + userMessage);
-  const outputTokens = resp.usage?.output_tokens || estimateTokens(responseText);
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    // Keep last incomplete line in buffer
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') continue;
+
+      try {
+        const event = JSON.parse(data);
+        // Collect text from content blocks
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          responseText += event.delta.text;
+        }
+        // Capture usage from message_start
+        if (event.type === 'message_start' && event.message?.usage) {
+          inputTokens = event.message.usage.input_tokens || 0;
+        }
+        // Capture output tokens from message_delta
+        if (event.type === 'message_delta' && event.usage) {
+          outputTokens = event.usage.output_tokens || 0;
+        }
+      } catch {
+        // Skip non-JSON SSE lines (comments, etc.)
+      }
+    }
+  }
+
+  if (!responseText) throw new Error('Empty API response — the AI returned no content. Please try again.');
+
+  // Fallback token estimation if not provided by API
+  if (!inputTokens) inputTokens = estimateTokens(systemPrompt + userMessage);
+  if (!outputTokens) outputTokens = estimateTokens(responseText);
   const costs = calcCost(inputTokens, outputTokens);
 
   if (_usageContext) {
