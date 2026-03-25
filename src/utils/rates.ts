@@ -208,6 +208,82 @@ RULES FOR USING THIS RATE TABLE:
 `;
 }
 
+// ═══ RATE LOOKUP TABLE — for post-processing validation ═══
+// Maps DSR reference codes to exact INR rates
+export const CPWD_RATE_LOOKUP: Record<string, number> = {
+  'DSR 2.1': 398, 'DSR 2.2': 487, 'DSR 2.8': 1042, 'DSR 2.19': 108,
+  'DSR 2.22': 1580, 'DSR 2.38': 54, 'DSR 2.40': 3200, 'DSR 2.35': 462,
+  'DSR 4.1': 5410, 'DSR 4.2': 5862, 'DSR 4.7': 6438, 'DSR 4.8': 7126,
+  'DSR 4.9': 7894, 'DSR 4.10': 8762, 'DSR 4.11': 9684, 'DSR 4.20': 438,
+  'DSR 5.1': 78.50, 'DSR 5.2': 82.40, 'DSR 5.10': 104, 'DSR 5.15': 92, 'DSR 5.20': 138,
+  'DSR 6.1': 6942, 'DSR 6.2': 6284, 'DSR 6.12': 4586, 'DSR 6.13': 4128,
+  'DSR 6.14': 3472, 'DSR 6.8': 5186, 'DSR 6.10': 4382, 'DSR 6.18': 3948, 'DSR 6.20': 5126,
+  'DSR 11.1': 228, 'DSR 11.2': 204, 'DSR 11.3': 258, 'DSR 11.5': 312,
+  'DSR 11.4': 268, 'DSR 11.8': 104, 'DSR 11.12': 98, 'DSR 11.10': 132,
+  'DSR 14.32': 1164, 'DSR 14.33': 1342, 'DSR 14.28': 668, 'DSR 14.30': 594,
+  'DSR 14.15': 786, 'DSR 14.20': 2284, 'DSR 14.22': 2836, 'DSR 14.5': 326,
+  'DSR 14.8': 408, 'DSR 14.40': 568, 'DSR 14.35': 308,
+  'DSR 15.5': 324, 'DSR 15.6': 368, 'DSR 15.1': 148, 'DSR 15.8': 226,
+  'DSR 15.3': 312, 'DSR 15.12': 542, 'DSR 15.2': 382,
+  'DSR 17.1': 8640, 'DSR 17.2': 10850, 'DSR 17.5': 1486, 'DSR 17.8': 4180,
+  'DSR 17.12': 21400, 'DSR 18.5': 1786, 'DSR 18.6': 1982, 'DSR 18.8': 1486,
+  'DSR 18.15': 784, 'DSR 17.20': 3240, 'DSR 17.22': 2380, 'DSR 17.25': 468,
+  'DSR 21.5': 78, 'DSR 21.6': 102, 'DSR 21.8': 106, 'DSR 21.10': 148,
+  'DSR 21.2': 54, 'DSR 21.1': 42, 'DSR 21.12': 92, 'DSR 21.3': 42,
+  'DSR 21.15': 32, 'DSR 21.18': 66, 'DSR 21.20': 116,
+  'DSR 14.45': 412, 'DSR 14.48': 496, 'DSR 14.49': 632, 'DSR 14.42': 328,
+  'DSR 14.50': 768, 'DSR 14.52': 558,
+  'DSR 26.1': 132, 'DSR 26.2': 158, 'DSR 26.3': 206, 'DSR 26.5': 182,
+  'DSR 26.25': 2980, 'DSR 26.22': 1024, 'DSR 26.20': 542, 'DSR 26.30': 1018,
+  'DSR 26.32': 1486, 'DSR 26.35': 4230, 'DSR 26.36': 6180,
+  'DSR 26.40': 5480, 'DSR 26.42': 3940, 'DSR 26.45': 4480, 'DSR 26.50': 3480,
+  'DSR 23.5': 326, 'DSR 23.6': 264, 'DSR 23.12': 218, 'DSR 23.11': 186,
+  'DSR 23.1': 368, 'DSR 23.2': 512, 'DSR 23.25': 7480, 'DSR 23.30': 11240,
+  'DSR 23.32': 4480, 'DSR 23.35': 5120, 'DSR 23.38': 5680, 'DSR 23.40': 1680,
+  'DSR 23.42': 4720, 'DSR 23.45': 586, 'DSR 23.50': 7680, 'DSR 23.55': 13840,
+};
+
+/**
+ * Validates and corrects rates from AI response.
+ * Claude sometimes multiplies INR rates by ~83.5 (USD→INR exchange rate).
+ * This function detects and corrects that inflation.
+ */
+export function validateAndCorrectRates(items: any[], rateField: string = 'unitRate', sourceField: string = 'rateSource'): any[] {
+  return items.map(item => {
+    const src = String(item[sourceField] || '');
+    // Extract DSR reference code from rateSource string
+    const dsrMatch = src.match(/DSR\s*(\d+\.\d+)/i);
+    if (dsrMatch) {
+      const dsrKey = `DSR ${dsrMatch[1]}`;
+      const correctRate = CPWD_RATE_LOOKUP[dsrKey];
+      if (correctRate !== undefined) {
+        const aiRate = Number(item[rateField]) || 0;
+        // If AI rate is significantly higher than correct rate (>5× off), replace it
+        if (aiRate > correctRate * 5) {
+          const corrected = { ...item };
+          corrected[rateField] = correctRate;
+          // Recalculate total if it exists
+          const qty = Number(corrected.quantity || corrected.qty) || 0;
+          if (corrected.total !== undefined) corrected.total = qty * correctRate;
+          if (corrected.amount !== undefined) corrected.amount = qty * correctRate;
+          return corrected;
+        }
+        // If AI rate is very close to correct rate (within 20%), keep it
+        // Otherwise if it's 2-5× off, still replace with correct rate
+        if (aiRate > correctRate * 2) {
+          const corrected = { ...item };
+          corrected[rateField] = correctRate;
+          const qty = Number(corrected.quantity || corrected.qty) || 0;
+          if (corrected.total !== undefined) corrected.total = qty * correctRate;
+          if (corrected.amount !== undefined) corrected.amount = qty * correctRate;
+          return corrected;
+        }
+      }
+    }
+    return item;
+  });
+}
+
 // Regional multipliers for different Indian cities
 export const REGIONAL_FACTORS: Record<string, number> = {
   'Delhi NCR': 1.00,

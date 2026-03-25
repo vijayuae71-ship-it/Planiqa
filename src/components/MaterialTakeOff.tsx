@@ -5,7 +5,7 @@ import { C, card, btnP, btnSm, sel, tbl, th, td, secTitle, empty, fmt } from '..
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
 import { generatePDF, PDFSection } from '../utils/pdf';
-import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
+import { getCPWDRateReference, getMiddleEastRates, validateAndCorrectRates } from '../utils/rates';
 
 interface Props {
   drawings: Drawing[];
@@ -161,7 +161,8 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
       const result = await callClaude(apiKey, buildMTOPrompt(), userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
-      const arr = Array.isArray(parsed) ? parsed : parsed.items || [];
+      const rawArr = Array.isArray(parsed) ? parsed : parsed.items || [];
+      const arr = validateAndCorrectRates(rawArr, 'unitRate', 'rateSource');
       const mapped: MTOItem[] = arr.map((r: any) => ({
         id: nextId(),
         category: r.category || 'General',

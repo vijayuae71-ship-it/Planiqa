@@ -5,7 +5,7 @@ import { C, card, btnP, btnS, btnSm, inp, sel, tbl, th, td, badge, secTitle, emp
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
 import { generatePDF, PDFSection } from '../utils/pdf';
-import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
+import { getCPWDRateReference, getMiddleEastRates, validateAndCorrectRates } from '../utils/rates';
 
 interface Props {
   drawings: Drawing[];
@@ -182,18 +182,30 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
       const result = await callClaude(apiKey, buildCostEstimatePrompt(), userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
-      const items = (parsed.items || []).map((i: any) => ({
+      // Validate rates: add a synthetic 'unitRate' for validation, then redistribute
+      const rawCEItems = (parsed.items || []).map((i: any) => ({
+        ...i,
+        unitRate: (Number(i.materialRate) || 0) + (Number(i.laborRate) || 0) + (Number(i.equipmentRate) || 0),
+        rateSource: i.rateSource || '',
+      }));
+      const validatedCE = validateAndCorrectRates(rawCEItems, 'unitRate', 'rateSource');
+      const items = validatedCE.map((i: any) => {
+        const origTotal = (Number(i.materialRate) || 0) + (Number(i.laborRate) || 0) + (Number(i.equipmentRate) || 0);
+        const correctedTotal = Number(i.unitRate) || origTotal;
+        // Redistribute: if rate was corrected, scale material/labor/equipment proportionally
+        const scale = origTotal > 0 ? correctedTotal / origTotal : 1;
+        return {
         ...i,
         quantity: Number(i.quantity) || 0,
-        materialRate: Number(i.materialRate) || 0,
-        laborRate: Number(i.laborRate) || 0,
-        equipmentRate: Number(i.equipmentRate) || 0,
-        total: Number(i.total) || (Number(i.quantity) || 0) * ((Number(i.materialRate) || 0) + (Number(i.laborRate) || 0) + (Number(i.equipmentRate) || 0)),
+        materialRate: Math.round((Number(i.materialRate) || 0) * scale * 100) / 100,
+        laborRate: Math.round((Number(i.laborRate) || 0) * scale * 100) / 100,
+        equipmentRate: Math.round((Number(i.equipmentRate) || 0) * scale * 100) / 100,
+        total: Number(i.quantity) || 0 > 0 ? (Number(i.quantity) || 0) * correctedTotal : Number(i.total) || 0,
         rateSource: i.rateSource || '',
         specification: i.specification || '',
         measurementBasis: i.measurementBasis || '',
         confirmed: i.confirmed !== false,
-      }));
+      }; });
       setData({
         drawingAnalysis: parsed.drawingAnalysis || null,
         items,

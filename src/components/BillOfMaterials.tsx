@@ -5,7 +5,7 @@ import { C, card, btnP, btnS, btnSm, inp, sel, tbl, th, td, badge, secTitle, emp
 import { callClaude, getSelectedDrawings, extractJSON } from '../utils/ai';
 import { downloadCSV } from '../utils/export';
 import { generatePDF, PDFSection } from '../utils/pdf';
-import { getCPWDRateReference, getMiddleEastRates } from '../utils/rates';
+import { getCPWDRateReference, getMiddleEastRates, validateAndCorrectRates } from '../utils/rates';
 
 interface Props {
   drawings: Drawing[];
@@ -145,7 +145,10 @@ ALL rates MUST be in INR.`;
       const result = await callClaude(apiKey, systemPrompt, userMsg, selected);
       const parsed = extractJSON(result);
       if (parsed._aiNote) { setError(parsed._aiNote); return; }
-      const rawItems = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const rawItems = validateAndCorrectRates(
+        Array.isArray(parsed) ? parsed : (parsed.items || []),
+        'unitRate', 'rateSource'
+      );
       const items: BOMItem[] = rawItems.map((item: any) => ({
         ...item,
         quantity: Number(item.quantity) || 0,
