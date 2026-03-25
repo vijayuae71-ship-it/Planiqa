@@ -134,7 +134,7 @@ export const MaterialTakeOff: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [editingWaste, setEditingWaste] = useState<string | null>(null);
   const [editWasteVal, setEditWasteVal] = useState('');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('INR');
 
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;

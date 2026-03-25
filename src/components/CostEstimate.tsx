@@ -165,7 +165,7 @@ export const CostEstimate: React.FC<Props> = ({ drawings, selectedDrawingIds, ap
   const [data, setData] = useState<CostData | null>(null);
   const [costBasis, setCostBasis] = useState('RSMeans');
   const [region, setRegion] = useState('UAE');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('INR');
 
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;

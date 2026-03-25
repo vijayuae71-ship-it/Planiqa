@@ -51,7 +51,7 @@ export const BillOfMaterials: React.FC<Props> = ({ drawings, selectedDrawingIds,
   const [data, setData] = useState<BOMData | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [tradeFilter, setTradeFilter] = useState('all');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('INR');
 
   const rate = EXCHANGE_RATES[currency] || 1;
   const sym = CURRENCY_SYMBOLS[currency] || currency;
