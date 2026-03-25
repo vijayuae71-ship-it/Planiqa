@@ -3,6 +3,11 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Edge Function — Claude API streaming proxy (NO timeout, unlike regular functions)
+[[edge_functions]]
+  path = "/api/claude"
+  function = "claude"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -360,8 +360,8 @@ export async function callClaude(
   // Enforce raw JSON output — prevents Claude from wrapping in markdown code fences
   const enhancedSystem = systemPrompt + '\n\nCRITICAL OUTPUT FORMAT RULE: Return ONLY raw JSON. Do NOT wrap in markdown code fences (```json```). Do NOT include any text before or after the JSON. The very first character of your response MUST be { or [ and the very last character MUST be } or ]. Any violation will cause a system parsing failure.';
 
-  // Call the Netlify serverless function with STREAMING (prevents 504 timeout)
-  const response = await fetch('/.netlify/functions/claude', {
+  // Call the Netlify Edge Function with STREAMING (Edge Functions have NO timeout — unlike regular Functions which die at 10s)
+  const response = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
