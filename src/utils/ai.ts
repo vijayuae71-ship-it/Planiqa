@@ -367,7 +367,7 @@ export async function callClaude(
     body: JSON.stringify({
       system: enhancedSystem,
       messages: [{ role: 'user', content }],
-      max_tokens: 32768,
+      max_tokens: 16384,
     }),
   });
 
@@ -380,6 +380,19 @@ export async function callClaude(
     throw new Error(errMsg);
   }
 
+  // Check if response is SSE stream or regular JSON (error case)
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    // Non-streaming response — likely an error from the serverless function
+    try {
+      const errData = await response.json();
+      throw new Error(errData?.error || errData?.details || 'Unexpected non-streaming response');
+    } catch (e: any) {
+      if (e.message.includes('Unexpected')) throw e;
+      throw new Error('Unexpected response format from API proxy');
+    }
+  }
+
   // Read SSE stream from Claude (streamed through our serverless function)
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response stream available');
@@ -390,37 +403,67 @@ export async function callClaude(
   let outputTokens = 0;
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    // Keep last incomplete line in buffer
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') continue;
-
-      try {
-        const event = JSON.parse(data);
-        // Collect text from content blocks
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-          responseText += event.delta.text;
-        }
-        // Capture usage from message_start
-        if (event.type === 'message_start' && event.message?.usage) {
-          inputTokens = event.message.usage.input_tokens || 0;
-        }
-        // Capture output tokens from message_delta
-        if (event.type === 'message_delta' && event.usage) {
-          outputTokens = event.usage.output_tokens || 0;
-        }
-      } catch {
-        // Skip non-JSON SSE lines (comments, etc.)
+  // Helper to process SSE lines
+  const processLine = (line: string) => {
+    if (!line.startsWith('data: ')) return;
+    const data = line.slice(6).trim();
+    if (data === '[DONE]') return;
+    try {
+      const event = JSON.parse(data);
+      // Collect text from content blocks
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        responseText += event.delta.text;
       }
+      // Capture usage from message_start
+      if (event.type === 'message_start' && event.message?.usage) {
+        inputTokens = event.message.usage.input_tokens || 0;
+      }
+      // Capture output tokens from message_delta
+      if (event.type === 'message_delta' && event.usage) {
+        outputTokens = event.usage.output_tokens || 0;
+      }
+      // Capture API errors during streaming
+      if (event.type === 'error') {
+        throw new Error(`Claude API error: ${event.error?.message || JSON.stringify(event.error)}`);
+      }
+    } catch (e: any) {
+      if (e.message?.startsWith('Claude API error')) throw e;
+      // Skip non-JSON SSE lines (comments, pings, etc.)
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      // Keep last incomplete line in buffer
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+
+    // CRITICAL: Process any remaining data in buffer after stream ends
+    if (buffer.trim()) {
+      processLine(buffer.trim());
+    }
+    // Flush the decoder
+    const remaining = decoder.decode();
+    if (remaining.trim()) {
+      for (const line of remaining.split('\n')) {
+        processLine(line.trim());
+      }
+    }
+  } catch (e: any) {
+    // If we got some text before the error, try to use it
+    if (responseText.length > 100) {
+      console.warn('Stream error after partial response, attempting to use partial data:', e.message);
+    } else {
+      throw e;
     }
   }
 

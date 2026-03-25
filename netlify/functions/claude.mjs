@@ -25,6 +25,9 @@ export default async (req) => {
   try {
     const body = await req.json();
 
+    // Cap max_tokens at model's limit (Claude Sonnet 4 = 16384 output tokens)
+    const maxTokens = Math.min(body.max_tokens || 16384, 16384);
+
     // Force streaming on — this is what prevents timeouts
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -35,7 +38,7 @@ export default async (req) => {
       },
       body: JSON.stringify({
         model: body.model || 'claude-sonnet-4-20250514',
-        max_tokens: body.max_tokens || 32768,
+        max_tokens: maxTokens,
         system: body.system || '',
         messages: body.messages || [],
         stream: true
